@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+root="${DESTDIR:-${BUILDROOT:-}}"
+
+if [ -z "$root" ]; then
+    if [ -d /buildroot/etc ]; then
+        root=/buildroot
+    else
+        root=/
+    fi
+fi
+
+mkdir -p "$root/usr/lib/locale"
+I18NPATH="$root/usr/share/i18n" localedef --prefix="$root" -i en_US -f UTF-8 en_US.UTF-8
+I18NPATH="$root/usr/share/i18n" localedef --prefix="$root" -i es_ES -f UTF-8 es_ES.UTF-8
+I18NPATH="$root/usr/share/i18n" localedef --prefix="$root" -i ca_ES -f UTF-8 ca_ES.UTF-8
+
+chroot "$root" /usr/bin/dconf update
+
+# GNOME Initial Setup creates the first user on boot when no local users exist.
+# On Arch, that admin user is placed in wheel; the sudoers rule above enables sudo.
+rm -f "$root/var/lib/AccountsService/users"/* 2>/dev/null || true

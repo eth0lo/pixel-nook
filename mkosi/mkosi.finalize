@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+root="${DESTDIR:-${BUILDROOT:-}}"
+
+if [ -z "$root" ]; then
+    if [ -d /buildroot/etc ]; then
+        root=/buildroot
+    else
+        root=/
+    fi
+fi
+
+systemctl --root="$root" enable gdm.service
+systemctl --root="$root" enable NetworkManager.service
+systemctl --root="$root" enable systemd-timesyncd.service
+systemctl --root="$root" enable avahi-daemon.service
+systemctl --root="$root" enable cups.service

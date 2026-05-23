@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Manage Printing
+Exec=xdg-open http://localhost:631/
+NoDisplay=true
