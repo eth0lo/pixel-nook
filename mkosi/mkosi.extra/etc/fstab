@@ -1,0 +1,2 @@
+PARTLABEL=var /var ext4 rw 0 2
+PARTLABEL=home /home ext4 rw 0 2

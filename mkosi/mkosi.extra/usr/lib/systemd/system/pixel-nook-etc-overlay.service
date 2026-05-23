@@ -1,0 +1,15 @@
+[Unit]
+Description=Prepare writable account database overlay for /etc
+Documentation=man:useradd(8)
+DefaultDependencies=no
+After=local-fs.target
+Before=basic.target accounts-daemon.service display-manager.service gdm.service gnome-initial-setup.service
+RequiresMountsFor=/var/lib/pixel-nook/etc-overlay
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/pixel-nook/setup-etc-overlay
+
+[Install]
+WantedBy=basic.target

@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+upper="${1:?overlay upper directory is required}"
+
+mkdir -p "$upper"
+
+for file in passwd shadow group gshadow subuid subgid machine-id; do
+    if [ ! -e "$upper/$file" ]; then
+        : >"$upper/$file"
+    fi
+done
+
+chown root:root \
+    "$upper/passwd" \
+    "$upper/shadow" \
+    "$upper/group" \
+    "$upper/gshadow" \
+    "$upper/subuid" \
+    "$upper/subgid" \
+    "$upper/machine-id"
+
+chmod 0644 \
+    "$upper/passwd" \
+    "$upper/group" \
+    "$upper/subuid" \
+    "$upper/subgid" \
+    "$upper/machine-id"
+
+chmod 0600 "$upper/shadow" "$upper/gshadow"

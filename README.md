@@ -15,6 +15,18 @@ After a successful build, `out/` contains:
 - `arch-gnome.initrd`: the generated initrd artifact
 - `initrd.cpio.zst`: the initrd archive generated during the build
 
+The disk image uses an A/B root layout:
+
+- `ESP`: EFI System Partition containing the bootloader and boot artifacts
+- `root-a`: populated read-only root slot used for the initial boot
+- `root-b`: empty read-only root slot reserved for updates
+- `var`: writable persistent `/var` shared across root slots
+- `home`: writable persistent `/home` shared across root slots
+
+The default kernel command line boots `root-a` with `root=PARTLABEL=root-a ro`. After an updater writes a complete OS tree to `root-b`, switch the boot entry or kernel command line to `root=PARTLABEL=root-b ro` to boot the updated slot. The `/var` and `/home` partitions persist across slot switches so system state and user data remain writable while root slots stay read-only.
+
+Most of `/etc` comes from the active read-only root slot. A boot service mounts a small overlay on `/etc` so GNOME Initial Setup and GNOME Settings can update the local account databases. Local account records, group memberships, subordinate ID ranges, and the machine ID are kept persistently across boots while system account records continue to come from the active root slot; other `/etc` changes in the overlay are discarded before the next mount.
+
 ## Requirements
 
 To build the image, the host needs:
@@ -81,6 +93,7 @@ sudo dnf install qemu-system-x86 edk2-ovmf
 Create a writable UEFI variable store for the VM. This file stores per-VM firmware state, such as boot entries and display mode:
 
 ```bash
+mkdir -p out
 cp /usr/share/edk2/ovmf/OVMF_VARS_4M.qcow2 out/archlinux_VARS.qcow2
 ```
 
@@ -112,7 +125,7 @@ The QEMU command above attaches `out/arch-gnome.raw` read-write. Changes made in
 For disposable testing, create a qcow2 overlay and boot that instead. The VM can write normally, but the base image remains unchanged:
 
 ```bash
-qemu-img create -f qcow2 -b out/arch-gnome.raw -F raw out/arch-gnome.overlay.qcow2
+qemu-img create -f qcow2 -b "$PWD/out/arch-gnome.raw" -F raw out/arch-gnome.overlay.qcow2
 ```
 
 Then replace this disk line in the QEMU command:
@@ -147,6 +160,7 @@ cp /usr/share/edk2/ovmf/OVMF_VARS_4M.qcow2 out/archlinux_VARS.qcow2
 - `Containerfile`: builds the portable mkosi build environment
 - `docker-entrypoint.sh`: runs mkosi inside the container
 - `mkosi/mkosi.conf`: defines the Arch GNOME image
+- `mkosi/mkosi.repart/`: defines the A/B disk partition layout
 - `mkosi/mkosi.extra/`: files copied into the image
 - `mkosi/mkosi.postinst`: post-install customization run by mkosi
 - `mkosi/mkosi.finalize`: final build customization run by mkosi

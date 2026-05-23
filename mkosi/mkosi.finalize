@@ -11,8 +11,28 @@ if [ -z "$root" ]; then
     fi
 fi
 
+overlay="$root/var/lib/pixel-nook/etc-overlay"
+upper="$overlay/upper"
+work="$overlay/work"
+
+mkdir -p "$upper" "$work"
+
+for file in passwd shadow group gshadow subuid subgid; do
+    if [ -e "$root/etc/$file" ]; then
+        cp -a "$root/etc/$file" "$upper/$file"
+    else
+        : >"$upper/$file"
+    fi
+done
+
+# Generate a unique machine ID on first boot, but keep it persistent afterwards.
+: >"$upper/machine-id"
+
+sh "$root/usr/lib/pixel-nook/fix-etc-overlay-permissions" "$upper"
+
 systemctl --root="$root" enable gdm.service
 systemctl --root="$root" enable NetworkManager.service
 systemctl --root="$root" enable systemd-timesyncd.service
 systemctl --root="$root" enable avahi-daemon.service
 systemctl --root="$root" enable cups.service
+systemctl --root="$root" enable pixel-nook-etc-overlay.service

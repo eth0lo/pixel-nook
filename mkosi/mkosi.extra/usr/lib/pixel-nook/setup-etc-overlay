@@ -1,0 +1,250 @@
+#!/bin/sh
+set -eu
+
+state=/var/lib/pixel-nook/etc-overlay
+upper="$state/upper"
+work="$state/work"
+persistent_files="passwd shadow group gshadow subuid subgid machine-id"
+
+merge_passwd() {
+    awk -F: '
+        FNR == NR {
+            seen[$1] = 1
+            print
+            next
+        }
+
+        $3 ~ /^[0-9]+$/ && $3 >= 1000 && $3 != 65534 && !($1 in seen) {
+            seen[$1] = 1
+            print
+        }
+    ' /etc/passwd "$upper/passwd" >"$tmp/passwd"
+}
+
+merge_shadow() {
+    awk -F: '
+        FNR == 1 { file++ }
+
+        file == 1 {
+            if ($3 ~ /^[0-9]+$/ && $3 >= 1000 && $3 != 65534) {
+                local_user[$1] = 1
+            }
+            next
+        }
+
+        file == 2 {
+            seen[$1] = 1
+            print
+            next
+        }
+
+        file == 3 && ($1 in local_user) && !($1 in seen) {
+            seen[$1] = 1
+            print
+        }
+    ' "$upper/passwd" /etc/shadow "$upper/shadow" >"$tmp/shadow"
+}
+
+merge_group() {
+    awk -F: '
+        function filter_local(list, parts, i, member, count, filtered) {
+            count = split(list, parts, ",")
+            filtered = ""
+            for (i = 1; i <= count; i++) {
+                member = parts[i]
+                if (member != "" && (member in local_user)) {
+                    filtered = filtered (filtered == "" ? "" : ",") member
+                }
+            }
+            return filtered
+        }
+
+        function add_members(list, parts, i, member, count) {
+            count = split(list, parts, ",")
+            for (i = 1; i <= count; i++) {
+                member = parts[i]
+                if (member != "" && !(member in seen_member)) {
+                    seen_member[member] = 1
+                    merged_members = merged_members (merged_members == "" ? "" : ",") member
+                }
+            }
+        }
+
+        function merged(a, b, parts) {
+            delete seen_member
+            merged_members = ""
+            add_members(a, parts)
+            add_members(b, parts)
+            return merged_members
+        }
+
+        FNR == 1 { file++ }
+
+        file == 1 {
+            if ($3 ~ /^[0-9]+$/ && $3 >= 1000 && $3 != 65534) {
+                local_user[$1] = 1
+            }
+            next
+        }
+
+        file == 2 {
+            persisted_pass[$1] = $2
+            persisted_members[$1] = filter_local($4)
+            persisted_gid[$1] = $3
+            next
+        }
+
+        file == 3 {
+            seen[$1] = 1
+            $4 = merged($4, persisted_members[$1])
+            print $1 FS $2 FS $3 FS $4
+            next
+        }
+
+        END {
+            for (name in persisted_pass) {
+                if (persisted_gid[name] ~ /^[0-9]+$/ && persisted_gid[name] >= 1000 && persisted_gid[name] != 65534 && !(name in seen)) {
+                    print name FS persisted_pass[name] FS persisted_gid[name] FS persisted_members[name]
+                }
+            }
+        }
+    ' "$upper/passwd" "$upper/group" /etc/group >"$tmp/group"
+}
+
+merge_gshadow() {
+    awk -F: '
+        function filter_local(list, parts, i, member, count, filtered) {
+            count = split(list, parts, ",")
+            filtered = ""
+            for (i = 1; i <= count; i++) {
+                member = parts[i]
+                if (member != "" && (member in local_user)) {
+                    filtered = filtered (filtered == "" ? "" : ",") member
+                }
+            }
+            return filtered
+        }
+
+        function add_members(list, parts, i, member, count) {
+            count = split(list, parts, ",")
+            for (i = 1; i <= count; i++) {
+                member = parts[i]
+                if (member != "" && !(member in seen_member)) {
+                    seen_member[member] = 1
+                    merged_members = merged_members (merged_members == "" ? "" : ",") member
+                }
+            }
+        }
+
+        function merged(a, b, parts) {
+            delete seen_member
+            merged_members = ""
+            add_members(a, parts)
+            add_members(b, parts)
+            return merged_members
+        }
+
+        FNR == 1 { file++ }
+
+        file == 1 {
+            if ($3 ~ /^[0-9]+$/ && $3 >= 1000 && $3 != 65534) {
+                local_user[$1] = 1
+            }
+            next
+        }
+
+        file == 2 {
+            if ($3 ~ /^[0-9]+$/ && $3 >= 1000 && $3 != 65534) {
+                local_group[$1] = 1
+            }
+            next
+        }
+
+        file == 3 {
+            persisted_pass[$1] = $2
+            persisted_admins[$1] = filter_local($3)
+            persisted_members[$1] = filter_local($4)
+            next
+        }
+
+        file == 4 {
+            seen[$1] = 1
+            $3 = merged($3, persisted_admins[$1])
+            $4 = merged($4, persisted_members[$1])
+            print $1 FS $2 FS $3 FS $4
+            next
+        }
+
+        END {
+            for (name in persisted_pass) {
+                if ((name in local_group) && !(name in seen)) {
+                    print name FS persisted_pass[name] FS persisted_admins[name] FS persisted_members[name]
+                }
+            }
+        }
+    ' "$upper/passwd" "$upper/group" "$upper/gshadow" /etc/gshadow >"$tmp/gshadow"
+}
+
+merge_unique() {
+    src="$1"
+    dst="$2"
+
+    if [ -e "/etc/$src" ]; then
+        awk '!seen[$0]++' "/etc/$src" "$upper/$src" >"$tmp/$dst"
+    else
+        awk '!seen[$0]++' "$upper/$src" >"$tmp/$dst"
+    fi
+}
+
+if [ "$(findmnt -rn -o FSTYPE --target /etc 2>/dev/null || true)" = overlay ]; then
+    exit 0
+fi
+
+mkdir -p "$upper" "$work"
+
+tmp="$(mktemp -d "$state/.merge.XXXXXX")"
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+
+for file in passwd shadow group gshadow subuid subgid machine-id; do
+    if [ ! -e "$upper/$file" ]; then
+        if [ -e "/etc/$file" ]; then
+            cp -a "/etc/$file" "$upper/$file"
+        else
+            : >"$upper/$file"
+        fi
+    fi
+done
+
+# Keep only the account databases and machine ID persistent. Other /etc changes
+# made while the system is running are discarded before the next overlay mount.
+for path in "$upper"/* "$upper"/.[!.]* "$upper"/..?*; do
+    [ -e "$path" ] || continue
+
+    name="${path##*/}"
+    case " $persistent_files " in
+        *" $name "*) ;;
+        *) rm -rf -- "$path" ;;
+    esac
+done
+
+merge_passwd
+merge_shadow
+merge_group
+merge_gshadow
+merge_unique subuid subuid
+merge_unique subgid subgid
+
+mv "$tmp/passwd" "$upper/passwd"
+mv "$tmp/shadow" "$upper/shadow"
+mv "$tmp/group" "$upper/group"
+mv "$tmp/gshadow" "$upper/gshadow"
+mv "$tmp/subuid" "$upper/subuid"
+mv "$tmp/subgid" "$upper/subgid"
+
+/usr/lib/pixel-nook/fix-etc-overlay-permissions "$upper"
+
+mount -t overlay overlay -o "lowerdir=/etc,upperdir=$upper,workdir=$work" /etc
+
+if [ ! -s /etc/machine-id ]; then
+    systemd-machine-id-setup
+fi
