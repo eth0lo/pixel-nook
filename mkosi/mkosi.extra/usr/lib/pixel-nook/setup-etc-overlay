@@ -1,250 +1,566 @@
-#!/bin/sh
-set -eu
+#!/bin/bash
+set -euo pipefail
 
-state=/var/lib/pixel-nook/etc-overlay
-upper="$state/upper"
-work="$state/work"
-persistent_files="passwd shadow group gshadow subuid subgid machine-id"
+# Returns true when the provided /etc path is already backed by an overlay mount.
+#
+# Arguments:
+# - $1: /etc path to inspect.
+#
+# This makes the service idempotent: if systemd restarts it after the overlay is
+# mounted, the script exits without trying to merge or mount /etc again.
+is_overlay_mounted() {
+    local etc="$1"
 
-merge_passwd() {
-    awk -F: '
-        FNR == NR {
-            seen[$1] = 1
-            print
-            next
-        }
-
-        $3 ~ /^[0-9]+$/ && $3 >= 1000 && $3 != 65534 && !($1 in seen) {
-            seen[$1] = 1
-            print
-        }
-    ' /etc/passwd "$upper/passwd" >"$tmp/passwd"
+    [[ "$(findmnt -rn -o FSTYPE --target "$etc" 2>/dev/null || true)" == overlay ]]
 }
 
-merge_shadow() {
-    awk -F: '
-        FNR == 1 { file++ }
+# Returns true when the provided numeric ID belongs to a persistent local
+# account or group.
+#
+# Arguments:
+# - $1: ID to check.
+# - $2: minimum local ID.
+# - $3: nobody ID to exclude.
+#
+# Examples:
+# - 1000 is local and should be preserved.
+# - 65534 is nobody and should not be preserved as a local account.
+# - 81 is a system ID and should stay controlled by the image.
+is_local_id() {
+    local id="$1"
+    local local_id_min="$2"
+    local nobody_id="$3"
 
-        file == 1 {
-            if ($3 ~ /^[0-9]+$/ && $3 >= 1000 && $3 != 65534) {
-                local_user[$1] = 1
-            }
-            next
-        }
-
-        file == 2 {
-            seen[$1] = 1
-            print
-            next
-        }
-
-        file == 3 && ($1 in local_user) && !($1 in seen) {
-            seen[$1] = 1
-            print
-        }
-    ' "$upper/passwd" /etc/shadow "$upper/shadow" >"$tmp/shadow"
+    [[ "$id" =~ ^[0-9]+$ ]] && (( id >= local_id_min && id != nobody_id ))
 }
 
-merge_group() {
-    awk -F: '
-        function filter_local(list, parts, i, member, count, filtered) {
-            count = split(list, parts, ",")
-            filtered = ""
-            for (i = 1; i <= count; i++) {
-                member = parts[i]
-                if (member != "" && (member in local_user)) {
-                    filtered = filtered (filtered == "" ? "" : ",") member
-                }
-            }
-            return filtered
-        }
+# Creates the overlay upper and work directories under the persistent /var
+# partition.
+#
+# Arguments:
+# - $1: overlay upper directory.
+# - $2: overlay work directory.
+prepare_state_dirs() {
+    local upper="$1"
+    local work="$2"
 
-        function add_members(list, parts, i, member, count) {
-            count = split(list, parts, ",")
-            for (i = 1; i <= count; i++) {
-                member = parts[i]
-                if (member != "" && !(member in seen_member)) {
-                    seen_member[member] = 1
-                    merged_members = merged_members (merged_members == "" ? "" : ",") member
-                }
-            }
-        }
-
-        function merged(a, b, parts) {
-            delete seen_member
-            merged_members = ""
-            add_members(a, parts)
-            add_members(b, parts)
-            return merged_members
-        }
-
-        FNR == 1 { file++ }
-
-        file == 1 {
-            if ($3 ~ /^[0-9]+$/ && $3 >= 1000 && $3 != 65534) {
-                local_user[$1] = 1
-            }
-            next
-        }
-
-        file == 2 {
-            persisted_pass[$1] = $2
-            persisted_members[$1] = filter_local($4)
-            persisted_gid[$1] = $3
-            next
-        }
-
-        file == 3 {
-            seen[$1] = 1
-            $4 = merged($4, persisted_members[$1])
-            print $1 FS $2 FS $3 FS $4
-            next
-        }
-
-        END {
-            for (name in persisted_pass) {
-                if (persisted_gid[name] ~ /^[0-9]+$/ && persisted_gid[name] >= 1000 && persisted_gid[name] != 65534 && !(name in seen)) {
-                    print name FS persisted_pass[name] FS persisted_gid[name] FS persisted_members[name]
-                }
-            }
-        }
-    ' "$upper/passwd" "$upper/group" /etc/group >"$tmp/group"
+    mkdir -p "$upper" "$work"
 }
 
-merge_gshadow() {
-    awk -F: '
-        function filter_local(list, parts, i, member, count, filtered) {
-            count = split(list, parts, ",")
-            filtered = ""
-            for (i = 1; i <= count; i++) {
-                member = parts[i]
-                if (member != "" && (member in local_user)) {
-                    filtered = filtered (filtered == "" ? "" : ",") member
-                }
-            }
-            return filtered
-        }
+# Ensures every persisted /etc file exists in the overlay upper directory.
+#
+# Arguments:
+# - $1: source /etc directory.
+# - $2: overlay upper directory.
+# - $3: space-separated list of persistent files.
+#
+# Existing upper files are left untouched because they contain runtime state from
+# previous boots. Missing files are seeded from the image /etc when available, or
+# created empty when the image does not provide them.
+initialize_persistent_files() {
+    local etc="$1"
+    local upper="$2"
+    local persistent_files="$3"
+    local file
 
-        function add_members(list, parts, i, member, count) {
-            count = split(list, parts, ",")
-            for (i = 1; i <= count; i++) {
-                member = parts[i]
-                if (member != "" && !(member in seen_member)) {
-                    seen_member[member] = 1
-                    merged_members = merged_members (merged_members == "" ? "" : ",") member
-                }
-            }
-        }
-
-        function merged(a, b, parts) {
-            delete seen_member
-            merged_members = ""
-            add_members(a, parts)
-            add_members(b, parts)
-            return merged_members
-        }
-
-        FNR == 1 { file++ }
-
-        file == 1 {
-            if ($3 ~ /^[0-9]+$/ && $3 >= 1000 && $3 != 65534) {
-                local_user[$1] = 1
-            }
-            next
-        }
-
-        file == 2 {
-            if ($3 ~ /^[0-9]+$/ && $3 >= 1000 && $3 != 65534) {
-                local_group[$1] = 1
-            }
-            next
-        }
-
-        file == 3 {
-            persisted_pass[$1] = $2
-            persisted_admins[$1] = filter_local($3)
-            persisted_members[$1] = filter_local($4)
-            next
-        }
-
-        file == 4 {
-            seen[$1] = 1
-            $3 = merged($3, persisted_admins[$1])
-            $4 = merged($4, persisted_members[$1])
-            print $1 FS $2 FS $3 FS $4
-            next
-        }
-
-        END {
-            for (name in persisted_pass) {
-                if ((name in local_group) && !(name in seen)) {
-                    print name FS persisted_pass[name] FS persisted_admins[name] FS persisted_members[name]
-                }
-            }
-        }
-    ' "$upper/passwd" "$upper/group" "$upper/gshadow" /etc/gshadow >"$tmp/gshadow"
-}
-
-merge_unique() {
-    src="$1"
-    dst="$2"
-
-    if [ -e "/etc/$src" ]; then
-        awk '!seen[$0]++' "/etc/$src" "$upper/$src" >"$tmp/$dst"
-    else
-        awk '!seen[$0]++' "$upper/$src" >"$tmp/$dst"
-    fi
-}
-
-if [ "$(findmnt -rn -o FSTYPE --target /etc 2>/dev/null || true)" = overlay ]; then
-    exit 0
-fi
-
-mkdir -p "$upper" "$work"
-
-tmp="$(mktemp -d "$state/.merge.XXXXXX")"
-trap 'rm -rf "$tmp"' EXIT HUP INT TERM
-
-for file in passwd shadow group gshadow subuid subgid machine-id; do
-    if [ ! -e "$upper/$file" ]; then
-        if [ -e "/etc/$file" ]; then
-            cp -a "/etc/$file" "$upper/$file"
-        else
-            : >"$upper/$file"
+    for file in $persistent_files; do
+        if [[ ! -e "$upper/$file" ]]; then
+            if [[ -e "$etc/$file" ]]; then
+                cp -a "$etc/$file" "$upper/$file"
+            else
+                : >"$upper/$file"
+            fi
         fi
+    done
+}
+
+# Removes any upperdir entries that are not intentionally persistent.
+#
+# Arguments:
+# - $1: overlay upper directory.
+# - $2: space-separated list of persistent files.
+#
+# OverlayFS may capture arbitrary /etc writes at runtime. This system only keeps
+# account databases and machine-id persistent, so files such as modified service
+# config or temporary editor backups are discarded before the next overlay mount.
+discard_unmanaged_upper_files() {
+    local upper="$1"
+    local persistent_files="$2"
+    local path name
+
+    for path in "$upper"/* "$upper"/.[!.]* "$upper"/..?*; do
+        [[ -e "$path" ]] || continue
+
+        name="${path##*/}"
+        case " $persistent_files " in
+            *" $name "*) ;;
+            *) rm -rf -- "$path" ;;
+        esac
+    done
+}
+
+# Creates the temporary directory used to build merged account databases before
+# atomically moving them into the overlay upper directory.
+#
+# Arguments:
+# - $1: overlay state directory.
+create_merge_workspace() {
+    local state="$1"
+
+    mktemp -d "$state/.merge.XXXXXX"
+}
+
+# Removes a merge workspace created by create_merge_workspace.
+#
+# Arguments:
+# - $1: temporary merge workspace path.
+cleanup_merge_workspace() {
+    local tmp="$1"
+
+    if [[ -n "$tmp" ]]; then
+        rm -rf "$tmp"
     fi
-done
+}
 
-# Keep only the account databases and machine ID persistent. Other /etc changes
-# made while the system is running are discarded before the next overlay mount.
-for path in "$upper"/* "$upper"/.[!.]* "$upper"/..?*; do
-    [ -e "$path" ] || continue
+# Loads local usernames from a passwd-format file into an associative array.
+#
+# Arguments:
+# - $1: passwd-format file to read.
+# - $2: minimum local UID.
+# - $3: nobody UID to exclude.
+# - $4: name of an associative array that receives username keys.
+#
+# A user is considered local when its UID passes is_local_id.
+load_local_users() {
+    local file="$1"
+    local local_id_min="$2"
+    local nobody_id="$3"
+    local -n users="$4"
+    local line name _password uid _rest
 
-    name="${path##*/}"
-    case " $persistent_files " in
-        *" $name "*) ;;
-        *) rm -rf -- "$path" ;;
-    esac
-done
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        IFS=: read -r name _password uid _rest <<<"$line"
+        if is_local_id "${uid:-}" "$local_id_min" "$nobody_id"; then
+            users["$name"]=1
+        fi
+    done <"$file"
+}
 
-merge_passwd
-merge_shadow
-merge_group
-merge_gshadow
-merge_unique subuid subuid
-merge_unique subgid subgid
+# Loads local group names from a group-format file into an associative array.
+#
+# Arguments:
+# - $1: group-format file to read.
+# - $2: minimum local GID.
+# - $3: nobody GID to exclude.
+# - $4: name of an associative array that receives group-name keys.
+#
+# A group is considered local when its GID passes is_local_id.
+load_local_groups() {
+    local file="$1"
+    local local_id_min="$2"
+    local nobody_id="$3"
+    local -n groups="$4"
+    local line name _password gid _members
 
-mv "$tmp/passwd" "$upper/passwd"
-mv "$tmp/shadow" "$upper/shadow"
-mv "$tmp/group" "$upper/group"
-mv "$tmp/gshadow" "$upper/gshadow"
-mv "$tmp/subuid" "$upper/subuid"
-mv "$tmp/subgid" "$upper/subgid"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        IFS=: read -r name _password gid _members <<<"$line"
+        if is_local_id "${gid:-}" "$local_id_min" "$nobody_id"; then
+            groups["$name"]=1
+        fi
+    done <"$file"
+}
 
-/usr/lib/pixel-nook/fix-etc-overlay-permissions "$upper"
+# Filters a comma-separated user list down to users present in a known-user map.
+#
+# Arguments:
+# - $1: comma-separated list, such as "alice,bob,systemd-coredump".
+# - $2: name of an associative array containing allowed usernames.
+#
+# Example:
+# - list="alice,systemd-coredump", known users={alice} -> "alice"
+filter_known_users() {
+    local list="$1"
+    local -n known_users="$2"
+    local filtered= member
+    local -a members
 
-mount -t overlay overlay -o "lowerdir=/etc,upperdir=$upper,workdir=$work" /etc
+    IFS=, read -r -a members <<<"$list"
+    for member in "${members[@]}"; do
+        if [[ -n "$member" && -n "${known_users[$member]+x}" ]]; then
+            if [[ -n "$filtered" ]]; then
+                filtered+=,
+            fi
+            filtered+="$member"
+        fi
+    done
 
-if [ ! -s /etc/machine-id ]; then
-    systemd-machine-id-setup
+    printf '%s\n' "$filtered"
+}
+
+# Merges two comma-separated lists while preserving first-seen order and removing
+# duplicates.
+#
+# Arguments:
+# - $1: base list from the image.
+# - $2: persisted list from the overlay upper directory.
+#
+# Example:
+# - first="root,alice", second="alice,bob" -> "root,alice,bob"
+merge_csv_lists() {
+    local first="$1"
+    local second="$2"
+    local merged= list member
+    local -A seen_members=()
+    local -a members=()
+
+    for list in "$first" "$second"; do
+        IFS=, read -r -a members <<<"$list"
+        for member in "${members[@]}"; do
+            if [[ -n "$member" && -z "${seen_members[$member]+x}" ]]; then
+                seen_members["$member"]=1
+                if [[ -n "$merged" ]]; then
+                    merged+=,
+                fi
+                merged+="$member"
+            fi
+        done
+    done
+
+    printf '%s\n' "$merged"
+}
+
+# Merges /etc/passwd with the persisted passwd database.
+#
+# Arguments:
+# - $1: source /etc directory.
+# - $2: overlay upper directory.
+# - $3: temporary merge workspace.
+# - $4: minimum local UID.
+# - $5: nobody UID to exclude.
+#
+# The image passwd file is authoritative. Persisted users are appended only when
+# they are local users and their names are not already defined by the image.
+#
+# Example:
+# - image contains root and daemon.
+# - upper contains alice:1000 and daemon:1000.
+# - result keeps image daemon and appends alice only.
+merge_passwd_db() {
+    local etc="$1"
+    local upper="$2"
+    local tmp="$3"
+    local local_id_min="$4"
+    local nobody_id="$5"
+    local line name _password uid _rest
+    local -A seen_users=()
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        IFS=: read -r name _rest <<<"$line"
+        seen_users["$name"]=1
+        printf '%s\n' "$line"
+    done <"$etc/passwd" >"$tmp/passwd"
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        IFS=: read -r name _password uid _rest <<<"$line"
+        if is_local_id "${uid:-}" "$local_id_min" "$nobody_id" && [[ -z "${seen_users[$name]+x}" ]]; then
+            seen_users["$name"]=1
+            printf '%s\n' "$line"
+        fi
+    done <"$upper/passwd" >>"$tmp/passwd"
+}
+
+# Merges /etc/shadow with the persisted shadow database.
+#
+# Arguments:
+# - $1: source /etc directory.
+# - $2: overlay upper directory.
+# - $3: temporary merge workspace.
+# - $4: minimum local UID.
+# - $5: nobody UID to exclude.
+#
+# The image shadow file is authoritative. Persisted shadow entries are appended
+# only for local users from the persisted passwd file whose names are absent from
+# the image shadow file.
+merge_shadow_db() {
+    local etc="$1"
+    local upper="$2"
+    local tmp="$3"
+    local local_id_min="$4"
+    local nobody_id="$5"
+    local line name _rest
+    local -A local_users=() seen_users=()
+
+    load_local_users "$upper/passwd" "$local_id_min" "$nobody_id" local_users
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        IFS=: read -r name _rest <<<"$line"
+        seen_users["$name"]=1
+        printf '%s\n' "$line"
+    done <"$etc/shadow" >"$tmp/shadow"
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        IFS=: read -r name _rest <<<"$line"
+        if [[ -n "${local_users[$name]+x}" && -z "${seen_users[$name]+x}" ]]; then
+            seen_users["$name"]=1
+            printf '%s\n' "$line"
+        fi
+    done <"$upper/shadow" >>"$tmp/shadow"
+}
+
+# Merges /etc/group with the persisted group database.
+#
+# Arguments:
+# - $1: source /etc directory.
+# - $2: overlay upper directory.
+# - $3: temporary merge workspace.
+# - $4: minimum local GID.
+# - $5: nobody GID to exclude.
+#
+# The image group definitions are authoritative, but local persisted members are
+# merged into matching image groups. Persisted local groups missing from the
+# image are appended.
+#
+# Example:
+# - image has wheel:x:998:
+# - upper has wheel:x:998:alice and alice:x:1000:
+# - result has wheel:x:998:alice and appends alice:x:1000:
+merge_group_db() {
+    local etc="$1"
+    local upper="$2"
+    local tmp="$3"
+    local local_id_min="$4"
+    local nobody_id="$5"
+    local line name password gid members merged_members
+    local -A local_users=() persisted_passwords=() persisted_gids=() persisted_members=() seen_groups=()
+    local -a persisted_order=()
+
+    load_local_users "$upper/passwd" "$local_id_min" "$nobody_id" local_users
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        IFS=: read -r name password gid members <<<"$line"
+        if [[ -z "${persisted_passwords[$name]+x}" ]]; then
+            persisted_order+=("$name")
+        fi
+        persisted_passwords["$name"]="${password:-}"
+        persisted_gids["$name"]="${gid:-}"
+        persisted_members["$name"]="$(filter_known_users "${members:-}" local_users)"
+    done <"$upper/group"
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        IFS=: read -r name password gid members <<<"$line"
+        seen_groups["$name"]=1
+        merged_members="$(merge_csv_lists "${members:-}" "${persisted_members[$name]:-}")"
+        printf '%s:%s:%s:%s\n' "$name" "${password:-}" "${gid:-}" "$merged_members"
+    done <"$etc/group" >"$tmp/group"
+
+    for name in "${persisted_order[@]}"; do
+        if is_local_id "${persisted_gids[$name]:-}" "$local_id_min" "$nobody_id" && [[ -z "${seen_groups[$name]+x}" ]]; then
+            seen_groups["$name"]=1
+            printf '%s:%s:%s:%s\n' \
+                "$name" \
+                "${persisted_passwords[$name]}" \
+                "${persisted_gids[$name]}" \
+                "${persisted_members[$name]}"
+        fi
+    done >>"$tmp/group"
+}
+
+# Merges /etc/gshadow with the persisted gshadow database.
+#
+# Arguments:
+# - $1: source /etc directory.
+# - $2: overlay upper directory.
+# - $3: temporary merge workspace.
+# - $4: minimum local GID/UID.
+# - $5: nobody GID/UID to exclude.
+#
+# The image gshadow definitions are authoritative, but local persisted admins and
+# members are merged into matching image groups. Persisted gshadow entries are
+# appended only for local groups that still exist in the persisted group file.
+merge_gshadow_db() {
+    local etc="$1"
+    local upper="$2"
+    local tmp="$3"
+    local local_id_min="$4"
+    local nobody_id="$5"
+    local line name password admins members merged_admins merged_members
+    local -A local_users=() local_groups=() persisted_passwords=() persisted_admins=() persisted_members=() seen_groups=()
+    local -a persisted_order=()
+
+    load_local_users "$upper/passwd" "$local_id_min" "$nobody_id" local_users
+    load_local_groups "$upper/group" "$local_id_min" "$nobody_id" local_groups
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        IFS=: read -r name password admins members <<<"$line"
+        if [[ -z "${persisted_passwords[$name]+x}" ]]; then
+            persisted_order+=("$name")
+        fi
+        persisted_passwords["$name"]="${password:-}"
+        persisted_admins["$name"]="$(filter_known_users "${admins:-}" local_users)"
+        persisted_members["$name"]="$(filter_known_users "${members:-}" local_users)"
+    done <"$upper/gshadow"
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        IFS=: read -r name password admins members <<<"$line"
+        seen_groups["$name"]=1
+        merged_admins="$(merge_csv_lists "${admins:-}" "${persisted_admins[$name]:-}")"
+        merged_members="$(merge_csv_lists "${members:-}" "${persisted_members[$name]:-}")"
+        printf '%s:%s:%s:%s\n' "$name" "${password:-}" "$merged_admins" "$merged_members"
+    done <"$etc/gshadow" >"$tmp/gshadow"
+
+    for name in "${persisted_order[@]}"; do
+        if [[ -n "${local_groups[$name]+x}" && -z "${seen_groups[$name]+x}" ]]; then
+            seen_groups["$name"]=1
+            printf '%s:%s:%s:%s\n' \
+                "$name" \
+                "${persisted_passwords[$name]}" \
+                "${persisted_admins[$name]}" \
+                "${persisted_members[$name]}"
+        fi
+    done >>"$tmp/gshadow"
+}
+
+# Merges line-based files by keeping the first occurrence of each full line.
+#
+# Arguments:
+# - $1: source /etc directory.
+# - $2: overlay upper directory.
+# - $3: temporary merge workspace.
+# - $4: source filename under /etc and upper, such as subuid.
+# - $5: output filename under the merge workspace.
+#
+# Image lines are written first, then persisted upper lines that are not exact
+# duplicates. This is used for subuid and subgid.
+merge_unique_lines() {
+    local etc="$1"
+    local upper="$2"
+    local tmp="$3"
+    local src="$4"
+    local dst="$5"
+    local line input
+    local -A seen_lines=()
+
+    : >"$tmp/$dst"
+    for input in "$etc/$src" "$upper/$src"; do
+        [[ -e "$input" ]] || continue
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            if [[ -z "${seen_lines[$line]+x}" ]]; then
+                seen_lines["$line"]=1
+                printf '%s\n' "$line"
+            fi
+        done <"$input" >>"$tmp/$dst"
+    done
+}
+
+# Builds all merged account databases in a temporary directory and then moves the
+# results into the overlay upper directory.
+#
+# Arguments:
+# - $1: source /etc directory.
+# - $2: overlay upper directory.
+# - $3: overlay state directory.
+# - $4: minimum local ID.
+# - $5: nobody ID to exclude.
+#
+# The temporary directory is removed when the merge subshell exits or receives a
+# handled signal.
+merge_account_databases() {
+    local etc="$1"
+    local upper="$2"
+    local state="$3"
+    local local_id_min="$4"
+    local nobody_id="$5"
+
+    (
+        local tmp tmp_quoted
+
+        tmp="$(create_merge_workspace "$state")"
+        printf -v tmp_quoted '%q' "$tmp"
+        trap "rm -rf -- $tmp_quoted" EXIT HUP INT TERM
+
+        merge_passwd_db "$etc" "$upper" "$tmp" "$local_id_min" "$nobody_id"
+        merge_shadow_db "$etc" "$upper" "$tmp" "$local_id_min" "$nobody_id"
+        merge_group_db "$etc" "$upper" "$tmp" "$local_id_min" "$nobody_id"
+        merge_gshadow_db "$etc" "$upper" "$tmp" "$local_id_min" "$nobody_id"
+        merge_unique_lines "$etc" "$upper" "$tmp" subuid subuid
+        merge_unique_lines "$etc" "$upper" "$tmp" subgid subgid
+
+        mv "$tmp/passwd" "$upper/passwd"
+        mv "$tmp/shadow" "$upper/shadow"
+        mv "$tmp/group" "$upper/group"
+        mv "$tmp/gshadow" "$upper/gshadow"
+        mv "$tmp/subuid" "$upper/subuid"
+        mv "$tmp/subgid" "$upper/subgid"
+    )
+}
+
+# Normalizes ownership and permissions for the persisted overlay files.
+#
+# Arguments:
+# - $1: overlay upper directory.
+#
+# This remains a separate helper because image finalization also uses it when
+# seeding the overlay upper directory.
+fix_overlay_permissions() {
+    local upper="$1"
+
+    /usr/lib/pixel-nook/fix-etc-overlay-permissions "$upper"
+}
+
+# Mounts /etc as an OverlayFS using the image /etc as lowerdir and the persistent
+# /var-backed upper/work directories for runtime writes.
+#
+# Arguments:
+# - $1: source /etc directory and overlay mount point.
+# - $2: overlay upper directory.
+# - $3: overlay work directory.
+mount_etc_overlay() {
+    local etc="$1"
+    local upper="$2"
+    local work="$3"
+
+    mount -t overlay overlay -o "lowerdir=$etc,upperdir=$upper,workdir=$work" "$etc"
+}
+
+# Ensures /etc/machine-id contains a generated machine ID after the overlay is
+# mounted, so the generated value is stored persistently in the upper directory.
+#
+# Arguments:
+# - $1: /etc directory to inspect.
+ensure_machine_id() {
+    local etc="$1"
+
+    if [[ ! -s "$etc/machine-id" ]]; then
+        systemd-machine-id-setup
+    fi
+}
+
+# Runs the boot-time overlay setup.
+#
+# The order matters: merge while /etc still points at the image, fix permissions
+# on upper files, then mount the overlay and initialize machine-id if needed.
+main() {
+    local etc=/etc
+    local state=/var/lib/pixel-nook/etc-overlay
+    local upper="$state/upper"
+    local work="$state/work"
+    local persistent_files="passwd shadow group gshadow subuid subgid machine-id"
+    local local_id_min=1000
+    local nobody_id=65534
+
+    if is_overlay_mounted "$etc"; then
+        exit 0
+    fi
+
+    prepare_state_dirs "$upper" "$work"
+    initialize_persistent_files "$etc" "$upper" "$persistent_files"
+    discard_unmanaged_upper_files "$upper" "$persistent_files"
+    merge_account_databases "$etc" "$upper" "$state" "$local_id_min" "$nobody_id"
+    fix_overlay_permissions "$upper"
+    mount_etc_overlay "$etc" "$upper" "$work"
+    ensure_machine_id "$etc"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
 fi

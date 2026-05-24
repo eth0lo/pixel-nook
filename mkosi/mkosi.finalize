@@ -1,38 +1,112 @@
-#!/bin/sh
-set -eu
+#!/bin/bash
+set -euo pipefail
 
-root="${DESTDIR:-${BUILDROOT:-}}"
+# Returns the root directory of the image being finalized.
+#
+# mkosi normally exposes the image root through DESTDIR or BUILDROOT. When those
+# variables are not set, fall back to /buildroot if it looks like an image root,
+# then to / for direct execution inside the target root.
+find_root() {
+    local root="${DESTDIR:-${BUILDROOT:-}}"
 
-if [ -z "$root" ]; then
-    if [ -d /buildroot/etc ]; then
-        root=/buildroot
+    if [[ -n "$root" ]]; then
+        printf '%s\n' "$root"
+    elif [[ -d /buildroot/etc ]]; then
+        printf '%s\n' /buildroot
     else
-        root=/
+        printf '%s\n' /
     fi
-fi
+}
 
-overlay="$root/var/lib/pixel-nook/etc-overlay"
-upper="$overlay/upper"
-work="$overlay/work"
+# Creates the OverlayFS upper and work directories used later at boot.
+#
+# Arguments:
+# - $1: overlay upper directory.
+# - $2: overlay work directory.
+create_directories() {
+    local upper="$1"
+    local work="$2"
 
-mkdir -p "$upper" "$work"
+    mkdir -p "$upper" "$work"
+}
 
-for file in passwd shadow group gshadow subuid subgid; do
-    if [ -e "$root/etc/$file" ]; then
-        cp -a "$root/etc/$file" "$upper/$file"
-    else
-        : >"$upper/$file"
-    fi
-done
+# Seeds the overlay upper directory with the image account databases.
+#
+# Arguments:
+# - $1: image root directory.
+# - $2: overlay upper directory.
+#
+# Missing optional databases are created empty so the boot-time merge script can
+# always rely on the files existing.
+copy_original_etc_files() {
+    local root="$1"
+    local upper="$2"
+    local file
 
-# Generate a unique machine ID on first boot, but keep it persistent afterwards.
-: >"$upper/machine-id"
+    for file in passwd shadow group gshadow subuid subgid; do
+        if [[ -e "$root/etc/$file" ]]; then
+            cp -a "$root/etc/$file" "$upper/$file"
+        else
+            : >"$upper/$file"
+        fi
+    done
+}
 
-sh "$root/usr/lib/pixel-nook/fix-etc-overlay-permissions" "$upper"
+# Creates an empty persistent machine-id placeholder.
+#
+# systemd-machine-id-setup fills this on first boot after /etc is overlaid, so
+# each installed image gets a unique machine ID that persists across reboots.
+generate_machine_id() {
+    local upper="$1"
 
-systemctl --root="$root" enable gdm.service
-systemctl --root="$root" enable NetworkManager.service
-systemctl --root="$root" enable systemd-timesyncd.service
-systemctl --root="$root" enable avahi-daemon.service
-systemctl --root="$root" enable cups.service
-systemctl --root="$root" enable pixel-nook-etc-overlay.service
+    : >"$upper/machine-id"
+}
+
+# Prepares the persistent state consumed by pixel-nook-etc-overlay.service.
+#
+# Arguments:
+# - $1: image root directory.
+#
+# The permissions helper is intentionally reused here and at boot so both seeded
+# and runtime-generated overlay files have the same ownership and modes.
+seed_etc_overlay() {
+    local root="$1"
+    local overlay upper work
+
+    overlay="$root/var/lib/pixel-nook/etc-overlay"
+    upper="$overlay/upper"
+    work="$overlay/work"
+
+    create_directories "$upper" "$work"
+    copy_original_etc_files "$root" "$upper"
+    generate_machine_id "$upper"
+
+    sh "$root/usr/lib/pixel-nook/fix-etc-overlay-permissions" "$upper"
+}
+
+# Enables the services expected to start in the generated image.
+#
+# Arguments:
+# - $1: image root directory.
+enable_services() {
+    local root="$1"
+
+    systemctl --root="$root" enable gdm.service
+    systemctl --root="$root" enable NetworkManager.service
+    systemctl --root="$root" enable systemd-timesyncd.service
+    systemctl --root="$root" enable avahi-daemon.service
+    systemctl --root="$root" enable cups.service
+    systemctl --root="$root" enable pixel-nook-etc-overlay.service
+}
+
+# Runs the image finalization steps.
+main() {
+    local root
+
+    root="$(find_root)"
+
+    seed_etc_overlay "$root"
+    enable_services "$root"
+}
+
+main "$@"

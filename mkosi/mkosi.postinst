@@ -1,23 +1,73 @@
-#!/bin/sh
-set -eu
+#!/bin/bash
+set -euo pipefail
 
-root="${DESTDIR:-${BUILDROOT:-}}"
+# Returns the root directory of the image being configured.
+#
+# mkosi normally exposes the image root through DESTDIR or BUILDROOT. When those
+# variables are not set, fall back to /buildroot if it looks like an image root,
+# then to / for direct execution inside the target root.
+find_root() {
+    local root="${DESTDIR:-${BUILDROOT:-}}"
 
-if [ -z "$root" ]; then
-    if [ -d /buildroot/etc ]; then
-        root=/buildroot
+    if [[ -n "$root" ]]; then
+        printf '%s\n' "$root"
+    elif [[ -d /buildroot/etc ]]; then
+        printf '%s\n' /buildroot
     else
-        root=/
+        printf '%s\n' /
     fi
-fi
+}
 
-mkdir -p "$root/usr/lib/locale"
-I18NPATH="$root/usr/share/i18n" localedef --prefix="$root" -i en_US -f UTF-8 en_US.UTF-8
-I18NPATH="$root/usr/share/i18n" localedef --prefix="$root" -i es_ES -f UTF-8 es_ES.UTF-8
-I18NPATH="$root/usr/share/i18n" localedef --prefix="$root" -i ca_ES -f UTF-8 ca_ES.UTF-8
+# Generates the locales required by the image.
+#
+# Arguments:
+# - $1: image root directory.
+generate_locales() {
+    local root="$1"
+    local locale input charmap
 
-chroot "$root" /usr/bin/dconf update
+    mkdir -p "$root/usr/lib/locale"
 
+    for locale in en_US.UTF-8 es_ES.UTF-8 ca_ES.UTF-8; do
+        input="${locale%%.*}"
+        charmap="${locale#*.}"
+        I18NPATH="$root/usr/share/i18n" localedef --prefix="$root" -i "$input" -f "$charmap" "$locale"
+    done
+}
+
+# Rebuilds the dconf database inside the image root so shipped defaults are
+# available at first boot.
+#
+# Arguments:
+# - $1: image root directory.
+update_dconf_database() {
+    local root="$1"
+
+    chroot "$root" /usr/bin/dconf update
+}
+
+# Removes stale AccountsService user records from the image.
+#
+# Arguments:
+# - $1: image root directory.
+#
 # GNOME Initial Setup creates the first user on boot when no local users exist.
-# On Arch, that admin user is placed in wheel; the sudoers rule above enables sudo.
-rm -f "$root/var/lib/AccountsService/users"/* 2>/dev/null || true
+# On Arch, that admin user is placed in wheel; the sudoers rule enables sudo.
+clear_accountsservice_users() {
+    local root="$1"
+
+    rm -f "$root/var/lib/AccountsService/users"/* 2>/dev/null || true
+}
+
+# Runs post-install configuration inside the generated image.
+main() {
+    local root
+
+    root="$(find_root)"
+
+    generate_locales "$root"
+    update_dconf_database "$root"
+    clear_accountsservice_users "$root"
+}
+
+main "$@"
