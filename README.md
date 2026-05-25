@@ -25,7 +25,11 @@ The disk image uses an A/B root layout:
 
 The default kernel command line boots `root-a` with `root=PARTLABEL=root-a ro`. After an updater writes a complete OS tree to `root-b`, switch the boot entry or kernel command line to `root=PARTLABEL=root-b ro` to boot the updated slot. The `/var` and `/home` partitions persist across slot switches so system state and user data remain writable while root slots stay read-only.
 
+This branch ships the A/B disk layout only. An updater that populates `root-b` and a slot-selector that rewrites the bootloader entry are out of scope and are not provided here; a future change is expected to wire them up (for example via `systemd-sysupdate` or `bootctl`).
+
 Most of `/etc` comes from the active read-only root slot. A boot service mounts a small overlay on `/etc` so GNOME Initial Setup and GNOME Settings can update the local account databases. Local account records, group memberships, subordinate ID ranges, and the machine ID are kept persistently across boots while system account records continue to come from the active root slot; other `/etc` changes in the overlay are discarded before the next mount.
+
+The persistent file list is intentionally narrow: `passwd`, `shadow`, `group`, `gshadow`, `subuid`, `subgid`, and `machine-id`. Other `/etc` files that GNOME Settings can change at runtime — notably `/etc/hostname`, `/etc/locale.conf`, and `/etc/vconsole.conf` — are not currently persisted and will be discarded on the next boot.
 
 ## Requirements
 
