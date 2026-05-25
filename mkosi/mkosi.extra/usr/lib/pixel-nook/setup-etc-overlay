@@ -549,6 +549,4 @@ main() {
     ensure_machine_id "$etc"
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-    main "$@"
-fi
+main "$@"
