@@ -110,18 +110,6 @@ create_merge_workspace() {
     mktemp -d "$state/.merge.XXXXXX"
 }
 
-# Removes a merge workspace created by create_merge_workspace.
-#
-# Arguments:
-# - $1: temporary merge workspace path.
-cleanup_merge_workspace() {
-    local tmp="$1"
-
-    if [[ -n "$tmp" ]]; then
-        rm -rf "$tmp"
-    fi
-}
-
 # Loads local usernames from a passwd-format file into an associative array.
 #
 # Arguments:
