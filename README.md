@@ -162,6 +162,9 @@ cp /usr/share/edk2/ovmf/OVMF_VARS_4M.qcow2 out/archlinux_VARS.qcow2
 - `mkosi/mkosi.conf`: defines the Arch GNOME image
 - `mkosi/mkosi.repart/`: defines the A/B disk partition layout
 - `mkosi/mkosi.extra/`: files copied into the image
+- `mkosi/mkosi.extra/usr/lib/pixel-nook/setup-etc-overlay`: boot-time merge and mount of the `/etc` overlay
+- `mkosi/mkosi.extra/usr/lib/pixel-nook/fix-etc-overlay-permissions`: shared helper that normalizes ownership and mode on persisted `/etc` files
+- `mkosi/mkosi.extra/usr/lib/systemd/system/pixel-nook-etc-overlay.service`: systemd unit that runs `setup-etc-overlay` before login services
 - `mkosi/mkosi.postinst`: post-install customization run by mkosi
 - `mkosi/mkosi.finalize`: final build customization run by mkosi
 - `out/`: generated build output
