@@ -3,6 +3,8 @@ set -eu
 
 root="${DESTDIR:-${BUILDROOT:-}}"
 
+allowlist_files='passwd shadow group gshadow subuid subgid machine-id'
+
 if [ -z "$root" ]; then
     if [ -d /buildroot/etc ]; then
         root=/buildroot
@@ -11,16 +13,98 @@ if [ -z "$root" ]; then
     fi
 fi
 
-mkdir -p "$root/home" "$root/var"
+persist_dir="$root/var/lib/ab-boot/etc"
+slot_seed_dir="$root/usr/lib/ab-boot/slot-seeds"
+entries_dir="$root/boot/loader/entries"
+
+mkdir -p "$root/home" "$root/var" "$persist_dir" \
+    "$slot_seed_dir/root-a" "$slot_seed_dir/root-b"
+
+printf 'root-a\n' > "$slot_seed_dir/root-a/slot"
+printf 'root-b\n' > "$slot_seed_dir/root-b/slot"
+chmod 0644 "$slot_seed_dir/root-a/slot" "$slot_seed_dir/root-b/slot"
+
+for name in $allowlist_files; do
+    cp -a "$root/etc/$name" "$persist_dir/$name"
+done
+
+for name in shadow gshadow subuid subgid machine-id; do
+    src_meta=$(stat -c '%u:%g:%a' "$root/etc/$name")
+    dst_meta=$(stat -c '%u:%g:%a' "$persist_dir/$name")
+
+    if [ "$src_meta" != "$dst_meta" ]; then
+        printf '%s\n' "Persisted metadata mismatch for $name: expected $src_meta got $dst_meta" >&2
+        exit 1
+    fi
+done
 
 root_slot_bytes=$((6 * 1024 * 1024 * 1024))
 root_slot_headroom_bytes=$((256 * 1024 * 1024))
 payload_bytes=$(du -sx --block-size=1 "$root" | cut -f1)
 
 if [ $((payload_bytes + root_slot_headroom_bytes)) -gt "$root_slot_bytes" ]; then
-    printf '%s\n' "Image root payload $payload_bytes exceeds the Phase 1 root-a budget of $root_slot_bytes bytes including reserved headroom" >&2
+    printf '%s\n' "Image root payload $payload_bytes exceeds the Phase 2 root-slot budget of $root_slot_bytes bytes including reserved headroom" >&2
     exit 1
 fi
+
+set -- "$entries_dir"/*.conf
+
+if [ ! -e "$1" ] || [ "$#" -ne 1 ]; then
+    printf '%s\n' "Expected exactly one generated loader entry under $entries_dir before deriving root-b" >&2
+    exit 1
+fi
+
+root_a_entry=$1
+root_a_id=$(basename "$root_a_entry" .conf)
+root_b_entry="$entries_dir/${root_a_id}-root-b.conf"
+root_a_tmp=$(mktemp)
+root_b_tmp=$(mktemp)
+found_title=0
+found_options=0
+
+while IFS= read -r line; do
+    case "$line" in
+        title\ *)
+            printf '%s\n' 'title Arch GNOME (root-a)' >> "$root_a_tmp"
+            printf '%s\n' 'title Arch GNOME (root-b)' >> "$root_b_tmp"
+            found_title=1
+            ;;
+        options\ *)
+            case "$line" in
+                *root=PARTLABEL=root-a*)
+                    printf '%s\n' "$line" >> "$root_a_tmp"
+                    printf '%s\n' "$(printf '%s\n' "$line" | sed 's/root=PARTLABEL=root-a/root=PARTLABEL=root-b/')" >> "$root_b_tmp"
+                    found_options=1
+                    ;;
+                *)
+                    printf '%s\n' "Generated loader entry is missing root=PARTLABEL=root-a in its options line" >&2
+                    rm -f "$root_a_tmp" "$root_b_tmp"
+                    exit 1
+                    ;;
+            esac
+            ;;
+        *)
+            printf '%s\n' "$line" >> "$root_a_tmp"
+            printf '%s\n' "$line" >> "$root_b_tmp"
+            ;;
+    esac
+done < "$root_a_entry"
+
+if [ "$found_title" -ne 1 ] || [ "$found_options" -ne 1 ]; then
+    printf '%s\n' "Generated loader entry could not be rewritten for Phase 2 slot titles and root selection" >&2
+    rm -f "$root_a_tmp" "$root_b_tmp"
+    exit 1
+fi
+
+mv "$root_a_tmp" "$root_a_entry"
+mv "$root_b_tmp" "$root_b_entry"
+
+cat > "$root/boot/loader/loader.conf" <<EOF
+default $root_a_id
+timeout 5
+console-mode keep
+editor no
+EOF
 
 systemctl --root="$root" enable gdm.service
 systemctl --root="$root" enable NetworkManager.service
