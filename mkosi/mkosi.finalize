@@ -11,6 +11,17 @@ if [ -z "$root" ]; then
     fi
 fi
 
+mkdir -p "$root/home" "$root/var"
+
+root_slot_bytes=$((6 * 1024 * 1024 * 1024))
+root_slot_headroom_bytes=$((256 * 1024 * 1024))
+payload_bytes=$(du -sx --block-size=1 "$root" | cut -f1)
+
+if [ $((payload_bytes + root_slot_headroom_bytes)) -gt "$root_slot_bytes" ]; then
+    printf '%s\n' "Image root payload $payload_bytes exceeds the Phase 1 root-a budget of $root_slot_bytes bytes including reserved headroom" >&2
+    exit 1
+fi
+
 systemctl --root="$root" enable gdm.service
 systemctl --root="$root" enable NetworkManager.service
 systemctl --root="$root" enable systemd-timesyncd.service

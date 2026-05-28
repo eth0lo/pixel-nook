@@ -6,6 +6,8 @@ The build toolchain is portable: mkosi and the required Arch build tools run ins
 
 Build output is written to `out/`, including the bootable UEFI disk image at `out/arch-gnome.raw`.
 
+The disk image now uses a Phase 1 A/B-capable layout: a shared ESP, a bootable `root-a` slot, an inactive `root-b` placeholder slot, and separate shared `var` and `home` partitions. The image still boots only from `root-a` in this phase.
+
 ## What This Produces
 
 After a successful build, `out/` contains:
@@ -14,6 +16,14 @@ After a successful build, `out/` contains:
 - `arch-gnome.vmlinuz`: the generated kernel artifact
 - `arch-gnome.initrd`: the generated initrd artifact
 - `initrd.cpio.zst`: the initrd archive generated during the build
+
+Inside `arch-gnome.raw`, the Phase 1 partition schema is:
+
+- `esp`: shared EFI System Partition used by UEFI and `systemd-boot`
+- `root-a`: the only booted root slot in this phase
+- `root-b`: an inactive ext4 placeholder slot for later A/B work
+- `var`: shared writable `/var`
+- `home`: shared writable `/home`
 
 ## Requirements
 
@@ -147,9 +157,11 @@ cp /usr/share/edk2/ovmf/OVMF_VARS_4M.qcow2 out/archlinux_VARS.qcow2
 - `Containerfile`: builds the portable mkosi build environment
 - `docker-entrypoint.sh`: runs mkosi inside the container
 - `mkosi/mkosi.conf`: defines the Arch GNOME image
+- `mkosi/mkosi.repart/`: defines the fixed Phase 1 disk layout
 - `mkosi/mkosi.extra/`: files copied into the image
 - `mkosi/mkosi.postinst`: post-install customization run by mkosi
 - `mkosi/mkosi.finalize`: final build customization run by mkosi
+- `handoff/phase-1-validation.md`: manual validation checklist for the Phase 1 layout
 - `out/`: generated build output
 
 ## Notes

@@ -24,10 +24,12 @@ Produce an A/B-compatible disk image that still boots only from `root-a`.
 ## Implementation Tasks
 
 - Add `mkosi/mkosi.repart/` partition definitions.
-- Define a fixed-size or bounded-size `root-a` partition.
-- Define a matching `root-b` partition.
-- Define writable `/var` and `/home` partitions.
+- Define a fixed-size `root-a` partition and keep the initial image geometry intentionally simple.
+- Define a matching fixed-size `root-b` placeholder partition.
+- Define writable `/var` and `/home` partitions mounted by `PARTLABEL`.
 - Add an image `fstab` that mounts `/var` and `/home` by `PARTLABEL`.
+- Use `ext4` for `root-a`, `root-b`, `/var`, and `/home`.
+- Use `systemd-boot` explicitly and keep only a `root-a` boot path in this phase.
 - Set the default kernel command line to `root=PARTLABEL=root-a rw`.
 - Keep `root-a` writable in this phase so GNOME Initial Setup can create the first user and write account databases under `/etc`.
 - Confirm the generated disk still uses UEFI boot.
@@ -36,11 +38,14 @@ Produce an A/B-compatible disk image that still boots only from `root-a`.
 
 - Build the image with the containerized mkosi workflow.
 - Boot the image in QEMU.
+- Confirm the guest booted with UEFI.
 - Confirm `/` is mounted from `root-a`.
 - Confirm `/var` is mounted from the `var` partition.
 - Confirm `/home` is mounted from the `home` partition.
-- Confirm `root-b` exists but is not used.
+- Confirm partition labels and filesystem types match the design.
+- Confirm `root-b` exists but is not mounted or otherwise used.
 - Reboot and confirm `/var` and `/home` data persists.
+- Confirm GNOME Initial Setup can create the first user successfully.
 
 ## Deployable Gate
 
