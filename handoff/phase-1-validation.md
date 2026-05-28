@@ -91,44 +91,73 @@ This Phase 1 layout is for fresh images only. Existing single-slot images are no
    lsblk -f
    ```
 
-   Expected result: the image exposes partitions labeled `esp`, `root-a`, `root-b`, `var`, and `home`. `root-a`, `root-b`, `var`, and `home` use `ext4`.
+   Expected result: the image exposes filesystems labeled `ESP`, `root-a`, `root-b`, `var`, and `home`. `root-a`, `root-b`, `var`, and `home` use `ext4`.
 
 7. Confirm the running root slot is `root-a`.
 
+   7.1 Confirm `/` is mounted from the partition labeled `root-a`.
+
    ```bash
+   lsblk -f
    findmnt /
+   ```
+
+   Expected result: `lsblk -f` shows `/` mounted from the partition labeled `root-a`, and `findmnt /` resolves `/` to that same device.
+
+   7.2 Confirm the kernel command line still targets `root-a` and keeps the root filesystem writable.
+
+   ```bash
    cat /proc/cmdline
    ```
 
-   Expected result: `/` resolves to the partition labeled `root-a`, and the kernel command line includes `root=PARTLABEL=root-a rw`.
+   Expected result: the kernel command line includes `root=PARTLABEL=root-a rw`.
 
 8. Confirm `/var` and `/home` are mounted from their dedicated partitions.
 
    ```bash
+   lsblk -f
    findmnt /var
    findmnt /home
    ```
 
-   Expected result: `/var` is mounted from `PARTLABEL=var` and `/home` is mounted from `PARTLABEL=home`.
+   Expected result: `lsblk -f` shows `/var` mounted from the partition labeled `var` and `/home` mounted from the partition labeled `home`. `findmnt /var` and `findmnt /home` resolve to those same devices.
 
 9. Confirm `root-b` exists but is not mounted.
 
    ```bash
-   findmnt | grep root-b
    lsblk -f
+   findmnt | grep root-b
    ```
 
-   Expected result: `lsblk -f` shows `root-b`, and `findmnt | grep root-b` returns no matches.
+   Expected result: `lsblk -f` shows the partition labeled `root-b`, and `findmnt | grep root-b` returns no matches.
 
 10. Inspect the ESP contents.
 
-   ```bash
-   sudo mkdir -p /mnt/esp
-   sudo mount /dev/disk/by-partlabel/esp /mnt/esp
-   find /mnt/esp -maxdepth 3 -type f
+    ```bash
+    sudo mkdir -p /mnt/esp
+    sudo mount /dev/disk/by-partlabel/esp /mnt/esp
+    find /mnt/esp -maxdepth 3 -type f
+    ```
+
+   Expected result: the output should show three kinds of files.
+
+   - Bootloader files under `EFI/systemd/` and `EFI/BOOT/`. These prove the firmware has an EFI program to launch.
+   - A loader entry such as `loader/entries/arch-gnome-<kernel-version>.conf`. This proves `systemd-boot` has a menu entry for this image.
+   - Matching kernel and initrd payload files under `arch-gnome/`, including `vmlinuz`, `initrd`, and `kernel-modules.initrd`. These prove the loader entry points to files that actually exist.
+
+   A passing result looks similar to this:
+
+   ```text
+   /mnt/esp/EFI/systemd/systemd-bootx64.efi
+   /mnt/esp/EFI/BOOT/BOOTX64.EFI
+   /mnt/esp/loader/loader.conf
+   /mnt/esp/loader/entries/arch-gnome-<kernel-version>.conf
+   /mnt/esp/arch-gnome/<kernel-version>/vmlinuz
+   /mnt/esp/arch-gnome/initrd
+   /mnt/esp/arch-gnome/<kernel-version>/kernel-modules.initrd
    ```
 
-   Expected result: the ESP contains `systemd-boot` files and only the intended `root-a` boot entry for this image.
+   The important check is that there is one intended boot entry for this image and that its referenced kernel and initrd files are present in the ESP.
 
 11. Confirm `/var` and `/home` survive reboot.
 
