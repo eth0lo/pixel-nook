@@ -6,7 +6,7 @@ allowlist_files='passwd shadow group gshadow subuid subgid machine-id'
 mode="${1:-}"
 
 if [ -z "$mode" ]; then
-    printf '%s\n' 'usage: identity-sync restore|persist' >&2
+    printf '%s\n' 'usage: account-files-sync restore|persist' >&2
     exit 1
 fi
 

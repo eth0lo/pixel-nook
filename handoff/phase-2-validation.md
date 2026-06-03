@@ -16,6 +16,7 @@ This Phase 2 layout is for fresh images only. Existing single-slot images are no
 - The root filesystem stays mounted read-write on both slots.
 - `/var` and `/home` are shared between slots.
 - `/var/lib/ab-boot/etc/` is the canonical source for the allowlisted identity files.
+- The allowlisted identity files are restored into writable `/etc` before login and persisted back to shared state when they change.
 - Only the allowlisted identity files under `/etc` are guaranteed to stay aligned across slot switches.
 
 ## Validate The Image

@@ -1,0 +1,8 @@
+[Unit]
+Description=Sync account files back to shared state
+RequiresMountsFor=/var/lib/ab-boot/etc /etc
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/ab-boot/account-files-sync persist

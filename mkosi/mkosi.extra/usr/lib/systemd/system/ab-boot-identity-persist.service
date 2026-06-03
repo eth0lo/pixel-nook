@@ -1,8 +1,0 @@
-[Unit]
-Description=Persist Phase 2 identity file changes from /etc
-RequiresMountsFor=/var/lib/ab-boot/etc /etc
-After=local-fs.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/lib/ab-boot/identity-sync persist

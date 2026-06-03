@@ -49,6 +49,24 @@ Diagnostic-only note: booting a pristine image into `root-b` first can still be 
 - Persist changes to the allowlisted files back into `/var/lib/ab-boot/etc/` as they are updated.
 - Document slot selection through the `systemd-boot` UI.
 
+## Runtime Flow
+
+At boot, Phase 2 uses this runtime sequence:
+
+- Firmware loads `systemd-boot` from the shared ESP.
+- `systemd-boot` selects either the default `root-a` entry or the manual `root-b` entry.
+- The kernel mounts the selected root slot read-write.
+- `local-fs.target` mounts the shared `var` and `home` partitions.
+- `ab-boot-account-files-restore.service` runs before login services start.
+- That service calls `/usr/lib/ab-boot/account-files-sync restore`.
+- The restore step copies the allowlisted identity files from `/var/lib/ab-boot/etc/` into `/etc`.
+- `ab-boot-account-files-watch.path` then watches `/etc/passwd`, `/etc/shadow`, `/etc/group`, `/etc/gshadow`, `/etc/subuid`, `/etc/subgid`, and `/etc/machine-id`.
+- If one of those files changes, systemd starts `ab-boot-account-files-sync.service`.
+- That service calls `/usr/lib/ab-boot/account-files-sync persist`.
+- The persist step copies the current `/etc` versions back into `/var/lib/ab-boot/etc/`.
+
+Phase 2 keeps `/etc` writable for account-management tools. Shared identity continuity is achieved by restore-on-boot plus change-triggered persistence, not by bind-mounting files onto `/etc`.
+
 ## Validation
 
 - Boot the default `root-a` entry and complete GNOME Initial Setup.

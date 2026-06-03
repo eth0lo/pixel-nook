@@ -51,5 +51,5 @@ systemctl --root="$root" enable NetworkManager.service
 systemctl --root="$root" enable systemd-timesyncd.service
 systemctl --root="$root" enable avahi-daemon.service
 systemctl --root="$root" enable cups.service
-systemctl --root="$root" enable ab-boot-identity-restore.service
-systemctl --root="$root" enable ab-boot-identity-persist.path
+systemctl --root="$root" enable ab-boot-account-files-restore.service
+systemctl --root="$root" enable ab-boot-account-files-watch.path

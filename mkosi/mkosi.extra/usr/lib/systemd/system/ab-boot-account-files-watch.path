@@ -1,7 +1,7 @@
 [Unit]
-Description=Watch Phase 2 identity files for persistence
+Description=Watch account files in /etc for changes
 RequiresMountsFor=/var/lib/ab-boot/etc /etc
-After=ab-boot-identity-restore.service
+After=ab-boot-account-files-restore.service
 
 [Path]
 PathChanged=/etc/passwd
@@ -11,7 +11,7 @@ PathChanged=/etc/gshadow
 PathChanged=/etc/subuid
 PathChanged=/etc/subgid
 PathChanged=/etc/machine-id
-Unit=ab-boot-identity-persist.service
+Unit=ab-boot-account-files-sync.service
 
 [Install]
 WantedBy=multi-user.target
