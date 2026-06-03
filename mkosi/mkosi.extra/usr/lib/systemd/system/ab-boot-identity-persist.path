@@ -1,0 +1,17 @@
+[Unit]
+Description=Watch Phase 2 identity files for persistence
+RequiresMountsFor=/var/lib/ab-boot/etc /etc
+After=ab-boot-identity-restore.service
+
+[Path]
+PathChanged=/etc/passwd
+PathChanged=/etc/shadow
+PathChanged=/etc/group
+PathChanged=/etc/gshadow
+PathChanged=/etc/subuid
+PathChanged=/etc/subgid
+PathChanged=/etc/machine-id
+Unit=ab-boot-identity-persist.service
+
+[Install]
+WantedBy=multi-user.target

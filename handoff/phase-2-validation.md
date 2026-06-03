@@ -116,19 +116,19 @@ This Phase 2 layout is for fresh images only. Existing single-slot images are no
 
     Expected result: the directory contains `passwd`, `shadow`, `group`, `gshadow`, `subuid`, `subgid`, and `machine-id`.
 
-12. Confirm each allowlisted `/etc` file is bind-mounted from `/var/lib/ab-boot/etc/`.
+12. Confirm each allowlisted `/etc` file matches the persisted copy under `/var/lib/ab-boot/etc/`.
 
     ```bash
-    findmnt -T /etc/passwd
-    findmnt -T /etc/shadow
-    findmnt -T /etc/group
-    findmnt -T /etc/gshadow
-    findmnt -T /etc/subuid
-    findmnt -T /etc/subgid
-    findmnt -T /etc/machine-id
+    sha256sum /var/lib/ab-boot/etc/passwd /etc/passwd
+    sha256sum /var/lib/ab-boot/etc/shadow /etc/shadow
+    sha256sum /var/lib/ab-boot/etc/group /etc/group
+    sha256sum /var/lib/ab-boot/etc/gshadow /etc/gshadow
+    sha256sum /var/lib/ab-boot/etc/subuid /etc/subuid
+    sha256sum /var/lib/ab-boot/etc/subgid /etc/subgid
+    sha256sum /var/lib/ab-boot/etc/machine-id /etc/machine-id
     ```
 
-    Expected result: each target shows a bind mount whose source is the matching file under `/var/lib/ab-boot/etc/`.
+    Expected result: each command prints two identical hashes.
 
 13. Confirm the persisted sensitive files keep the expected ownership and permissions both at the source and at runtime.
 
@@ -146,7 +146,7 @@ This Phase 2 layout is for fresh images only. Existing single-slot images are no
       /etc/machine-id
     ```
 
-    Expected result: the persisted copies and their `/etc` bind-mounted views match.
+    Expected result: the persisted copies and their `/etc` runtime views match.
 
 14. Inspect the ESP and confirm both loader entries exist.
 
@@ -167,7 +167,11 @@ This Phase 2 layout is for fresh images only. Existing single-slot images are no
     ```bash
     sudo touch /var/lib/phase-2-var-marker
     touch /home/$USER/phase-2-home-marker
+    ls -l /var/lib/phase-2-var-marker
+    ls -l /home/$USER/phase-2-home-marker
     ```
+
+    Expected result: both marker files exist immediately after creation.
 
 16. Reboot and select `Arch GNOME (root-b)` from the `systemd-boot` menu.
 
@@ -183,21 +187,21 @@ This Phase 2 layout is for fresh images only. Existing single-slot images are no
 
 18. Confirm the same user created on `root-a` can log in on `root-b` without re-running GNOME Initial Setup.
 
-19. Confirm shared state and bind mounts still work on `root-b`.
+19. Confirm shared state and persisted identity restore still work on `root-b`.
 
     ```bash
     ls -l /var/lib/phase-2-var-marker
     ls -l /home/$USER/phase-2-home-marker
-    findmnt -T /etc/passwd
-    findmnt -T /etc/shadow
-    findmnt -T /etc/group
-    findmnt -T /etc/gshadow
-    findmnt -T /etc/subuid
-    findmnt -T /etc/subgid
-    findmnt -T /etc/machine-id
+    sha256sum /var/lib/ab-boot/etc/passwd /etc/passwd
+    sha256sum /var/lib/ab-boot/etc/shadow /etc/shadow
+    sha256sum /var/lib/ab-boot/etc/group /etc/group
+    sha256sum /var/lib/ab-boot/etc/gshadow /etc/gshadow
+    sha256sum /var/lib/ab-boot/etc/subuid /etc/subuid
+    sha256sum /var/lib/ab-boot/etc/subgid /etc/subgid
+    sha256sum /var/lib/ab-boot/etc/machine-id /etc/machine-id
     ```
 
-    Expected result: the markers are still present and each allowlisted `/etc` file still shows a bind mount from `/var/lib/ab-boot/etc/`.
+    Expected result: the markers created in step 15 are still present, and each `sha256sum` command prints two identical hashes.
 
 20. Reboot and let the timeout return to the default `root-a` entry.
 

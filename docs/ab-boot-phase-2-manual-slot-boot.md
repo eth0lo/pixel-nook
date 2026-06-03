@@ -26,10 +26,10 @@ Make both `root-a` and `root-b` independently bootable by manual boot entry sele
 - Keep shared kernel and initrd payloads on the ESP for both entries in this phase.
 - Keep both root slots mounted read-write in this phase.
 - Keep both slots identical except for the slot-local `/usr/lib/ab-boot/slot` marker.
-- Guarantee cross-slot continuity only for `/home`, `/var`, and the allowlisted identity files bound onto `/etc`.
+- Guarantee cross-slot continuity only for `/home`, `/var`, and the allowlisted identity files restored into `/etc` from shared state.
 - Keep the `/etc` persistence scope limited to `/etc/passwd`, `/etc/shadow`, `/etc/group`, `/etc/gshadow`, `/etc/subuid`, `/etc/subgid`, and `/etc/machine-id`.
 - Pre-populate `/var/lib/ab-boot/etc/` during image build and treat it as canonical from first boot onward.
-- Use individual `fstab` bind mounts for the allowlisted `/etc` files instead of generalized `/etc` overlay or sync logic.
+- Keep `/etc` writable for account-management tools and sync only the allowlisted identity files to and from shared state.
 - Support the shipped initialization flow where first-user creation happens on the default `root-a` boot path.
 
 Diagnostic-only note: booting a pristine image into `root-b` first can still be tested, but it is not part of the supported Phase 2 acceptance path.
@@ -45,7 +45,8 @@ Diagnostic-only note: booting a pristine image into `root-b` first can still be 
 - Persist `machine-id` so identity remains stable across slot switches.
 - Store persisted `/etc` state under `/var/lib/ab-boot/etc/`, not inside either root slot.
 - Pre-populate the allowlisted persisted files during image build.
-- Bind-mount the allowlisted files individually onto `/etc` at boot.
+- Restore the allowlisted files from `/var/lib/ab-boot/etc/` into `/etc` before login services start.
+- Persist changes to the allowlisted files back into `/var/lib/ab-boot/etc/` as they are updated.
 - Document slot selection through the `systemd-boot` UI.
 
 ## Validation
@@ -54,7 +55,7 @@ Diagnostic-only note: booting a pristine image into `root-b` first can still be 
 - Confirm the `systemd-boot` menu exposes both `root-a` and `root-b` entries and defaults to `root-a` after a short timeout.
 - Boot `root-b` manually and confirm the slot marker reports `root-b`.
 - Confirm both slots reach the same login or desktop flow after initialization on `root-a`.
-- Confirm the allowlisted `/etc` files are bind-mounted from `/var/lib/ab-boot/etc/`.
+- Confirm the allowlisted `/etc` files match the persisted copies under `/var/lib/ab-boot/etc/`.
 - Confirm the user created on `root-a` can log in on `root-b`.
 - Confirm `/var` and `/home` contents are visible from both slots.
 - Confirm changing data under `/home` from `root-a` is visible from `root-b`.

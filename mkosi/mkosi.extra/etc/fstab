@@ -1,11 +1,3 @@
-# Phase 2 mounts shared writable state and the allowlisted identity files
-# outside the root slots.
-/var/lib/ab-boot/etc/passwd /etc/passwd none bind,x-systemd.requires-mounts-for=/var/lib/ab-boot/etc/passwd 0 0
-/var/lib/ab-boot/etc/shadow /etc/shadow none bind,x-systemd.requires-mounts-for=/var/lib/ab-boot/etc/shadow 0 0
-/var/lib/ab-boot/etc/group /etc/group none bind,x-systemd.requires-mounts-for=/var/lib/ab-boot/etc/group 0 0
-/var/lib/ab-boot/etc/gshadow /etc/gshadow none bind,x-systemd.requires-mounts-for=/var/lib/ab-boot/etc/gshadow 0 0
-/var/lib/ab-boot/etc/subuid /etc/subuid none bind,x-systemd.requires-mounts-for=/var/lib/ab-boot/etc/subuid 0 0
-/var/lib/ab-boot/etc/subgid /etc/subgid none bind,x-systemd.requires-mounts-for=/var/lib/ab-boot/etc/subgid 0 0
-/var/lib/ab-boot/etc/machine-id /etc/machine-id none bind,x-systemd.requires-mounts-for=/var/lib/ab-boot/etc/machine-id 0 0
+# Phase 2 mounts shared writable state outside the root slots.
 PARTLABEL=var /var ext4 defaults 0 2
 PARTLABEL=home /home ext4 defaults 0 2
