@@ -1,0 +1,153 @@
+#!/bin/sh
+set -eu
+
+output_dir="${OUTPUTDIR:-}"
+image=
+workspace=
+tmp_dir=
+
+write_slot_marker() {
+    partition_index="$1"
+    slot_name="$2"
+    partition_start=$(printf '%s\n' "$partition_starts" | sed -n "${partition_index}p")
+    partition_size=$(printf '%s\n' "$partition_sizes" | sed -n "${partition_index}p")
+    partition_image="$tmp_dir/${slot_name}.img"
+    slot_file="$tmp_dir/${slot_name}.slot"
+
+    if [ -z "$partition_start" ] || [ -z "$partition_size" ]; then
+        printf '%s\n' "Could not determine partition geometry for $slot_name" >&2
+        exit 1
+    fi
+
+    dd if="$image" of="$partition_image" bs=512 skip="$partition_start" count="$partition_size" status=none
+    printf '%s\n' "$slot_name" > "$slot_file"
+    /usr/sbin/debugfs -w -R "write $slot_file /usr/lib/ab-boot/slot" "$partition_image" >/dev/null 2>&1
+    dd if="$partition_image" of="$image" bs=512 seek="$partition_start" count="$partition_size" conv=notrunc status=none
+}
+
+cleanup() {
+    if [ -n "$tmp_dir" ] && [ -d "$tmp_dir" ]; then
+        rm -rf "$tmp_dir"
+    fi
+}
+
+trap cleanup EXIT INT TERM
+
+if [ -z "$output_dir" ]; then
+    printf '%s\n' 'OUTPUTDIR is not set' >&2
+    exit 1
+fi
+
+set -- "$output_dir"/*.raw
+
+if [ -e "$1" ] && [ "$#" -eq 1 ]; then
+    image=$1
+else
+    for workspace_root in /work/var/tmp /var/tmp; do
+        workspace=$(ls -td "$workspace_root"/mkosi-workspace-* 2>/dev/null | sed -n '1p' || true)
+
+        if [ -n "$workspace" ]; then
+            break
+        fi
+    done
+
+    if [ -z "$workspace" ]; then
+        printf '%s\n' 'Expected a staged raw image in OUTPUTDIR or a mkosi workspace under /work/var/tmp/ or /var/tmp/' >&2
+        exit 1
+    fi
+
+    set -- "$workspace"/staging/*.raw
+
+    if [ ! -e "$1" ] || [ "$#" -ne 1 ]; then
+        printf '%s\n' "Expected exactly one staged raw image under $workspace/staging/" >&2
+        exit 1
+    fi
+
+    image=$1
+fi
+
+esp_start=$(/usr/sbin/sfdisk --json "$image" | sed -n 's/.*"start"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | sed -n '1p')
+
+if [ -z "$esp_start" ]; then
+    printf '%s\n' "Could not determine ESP offset in $image" >&2
+    exit 1
+fi
+
+esp_offset=$((esp_start * 512))
+fat_image="$image@@$esp_offset"
+tmp_dir=$(mktemp -d)
+partition_starts=$(/usr/sbin/sfdisk --json "$image" | sed -n 's/.*"start"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
+partition_sizes=$(/usr/sbin/sfdisk --json "$image" | sed -n 's/.*"size"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
+
+if ! /usr/sbin/mcopy -n -i "$fat_image" '::/loader/entries/*.conf' "$tmp_dir/" >/dev/null 2>&1; then
+    printf '%s\n' 'Expected exactly one generated loader entry under /loader/entries before deriving root-b' >&2
+    exit 1
+fi
+
+set -- "$tmp_dir"/*.conf
+
+if [ ! -e "$1" ] || [ "$#" -ne 1 ]; then
+    printf '%s\n' 'Expected exactly one generated loader entry under /loader/entries before deriving root-b' >&2
+    exit 1
+fi
+
+root_a_entry=$1
+root_a_name=$(basename "$root_a_entry")
+root_a_id=${root_a_name%.conf}
+root_b_entry="$tmp_dir/${root_a_id}-root-b.conf"
+root_a_tmp=$(mktemp)
+root_b_tmp=$(mktemp)
+found_title=0
+found_options=0
+
+while IFS= read -r line; do
+    case "$line" in
+        title\ *)
+            printf '%s\n' 'title Arch GNOME (root-a)' >> "$root_a_tmp"
+            printf '%s\n' 'title Arch GNOME (root-b)' >> "$root_b_tmp"
+            found_title=1
+            ;;
+        options\ *)
+            case "$line" in
+                *root=PARTLABEL=root-a*)
+                    printf '%s\n' "$line" >> "$root_a_tmp"
+                    printf '%s\n' "$(printf '%s\n' "$line" | sed 's/root=PARTLABEL=root-a/root=PARTLABEL=root-b/')" >> "$root_b_tmp"
+                    found_options=1
+                    ;;
+                *)
+                    printf '%s\n' 'Generated loader entry is missing root=PARTLABEL=root-a in its options line' >&2
+                    rm -f "$root_a_tmp" "$root_b_tmp"
+                    exit 1
+                    ;;
+            esac
+            ;;
+        *)
+            printf '%s\n' "$line" >> "$root_a_tmp"
+            printf '%s\n' "$line" >> "$root_b_tmp"
+            ;;
+    esac
+done < "$root_a_entry"
+
+if [ "$found_title" -ne 1 ] || [ "$found_options" -ne 1 ]; then
+    printf '%s\n' 'Generated loader entry could not be rewritten for Phase 2 slot titles and root selection' >&2
+    rm -f "$root_a_tmp" "$root_b_tmp"
+    exit 1
+fi
+
+mv "$root_a_tmp" "$root_a_entry"
+mv "$root_b_tmp" "$root_b_entry"
+
+cat > "$tmp_dir/loader.conf" <<EOF
+default $root_a_id
+timeout 5
+console-mode keep
+editor no
+EOF
+
+/usr/sbin/mcopy -o -i "$fat_image" "$root_a_entry" "::/loader/entries/$root_a_name"
+/usr/sbin/mcopy -o -i "$fat_image" "$root_b_entry" "::/loader/entries/$(basename "$root_b_entry")"
+/usr/sbin/mcopy -o -i "$fat_image" "$tmp_dir/loader.conf" '::/loader/loader.conf'
+
+# Stamp the slot-local marker into root-a and root-b after repart has populated both roots.
+write_slot_marker 2 root-a
+write_slot_marker 3 root-b

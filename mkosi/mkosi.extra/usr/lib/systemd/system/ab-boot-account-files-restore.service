@@ -1,0 +1,13 @@
+[Unit]
+Description=Restore persisted account files into /etc
+DefaultDependencies=no
+RequiresMountsFor=/var/lib/ab-boot/etc /etc
+After=local-fs.target
+Before=sysinit.target display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/ab-boot/account-files-sync restore
+
+[Install]
+WantedBy=sysinit.target

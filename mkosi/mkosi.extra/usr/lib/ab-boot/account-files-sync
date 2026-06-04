@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eu
+
+persist_dir=/var/lib/ab-boot/etc
+allowlist_files='passwd shadow group gshadow subuid subgid'
+mode="${1:-}"
+
+if [ -z "$mode" ]; then
+    printf '%s\n' 'usage: account-files-sync restore|persist' >&2
+    exit 1
+fi
+
+mkdir -p "$persist_dir"
+
+for name in $allowlist_files; do
+    src=
+    dst=
+
+    case "$mode" in
+        restore)
+            src="$persist_dir/$name"
+            dst="/etc/$name"
+            ;;
+        persist)
+            src="/etc/$name"
+            dst="$persist_dir/$name"
+            ;;
+        *)
+            printf '%s\n' "unknown mode: $mode" >&2
+            exit 1
+            ;;
+    esac
+
+    if [ ! -e "$src" ]; then
+        printf '%s\n' "missing source file: $src" >&2
+        exit 1
+    fi
+
+    cp -f "$src" "$dst"
+    chown --reference="$src" "$dst"
+    chmod --reference="$src" "$dst"
+done

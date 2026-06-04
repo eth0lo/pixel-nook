@@ -1,0 +1,16 @@
+[Unit]
+Description=Watch account files in /etc for changes
+RequiresMountsFor=/var/lib/ab-boot/etc /etc
+After=ab-boot-account-files-restore.service
+
+[Path]
+PathChanged=/etc/passwd
+PathChanged=/etc/shadow
+PathChanged=/etc/group
+PathChanged=/etc/gshadow
+PathChanged=/etc/subuid
+PathChanged=/etc/subgid
+Unit=ab-boot-account-files-sync.service
+
+[Install]
+WantedBy=multi-user.target
