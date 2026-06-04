@@ -10,7 +10,6 @@ PathChanged=/etc/group
 PathChanged=/etc/gshadow
 PathChanged=/etc/subuid
 PathChanged=/etc/subgid
-PathChanged=/etc/machine-id
 Unit=ab-boot-account-files-sync.service
 
 [Install]

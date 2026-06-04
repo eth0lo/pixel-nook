@@ -2,7 +2,7 @@
 set -eu
 
 persist_dir=/var/lib/ab-boot/etc
-allowlist_files='passwd shadow group gshadow subuid subgid machine-id'
+allowlist_files='passwd shadow group gshadow subuid subgid'
 mode="${1:-}"
 
 if [ -z "$mode" ]; then
@@ -36,5 +36,7 @@ for name in $allowlist_files; do
         exit 1
     fi
 
-    cp -a "$src" "$dst"
+    cp -f "$src" "$dst"
+    chown --reference="$src" "$dst"
+    chmod --reference="$src" "$dst"
 done

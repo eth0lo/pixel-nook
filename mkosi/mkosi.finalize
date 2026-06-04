@@ -3,7 +3,7 @@ set -eu
 
 root="${DESTDIR:-${BUILDROOT:-}}"
 
-allowlist_files='passwd shadow group gshadow subuid subgid machine-id'
+allowlist_files='passwd shadow group gshadow subuid subgid'
 
 if [ -z "$root" ]; then
     if [ -d /buildroot/etc ]; then
@@ -19,6 +19,10 @@ slot_seed_dir="$root/usr/lib/ab-boot/slot-seeds"
 mkdir -p "$root/home" "$root/var" "$persist_dir" \
     "$slot_seed_dir/root-a" "$slot_seed_dir/root-b"
 
+# Leave machine-id empty in the image so systemd generates a unique value on first boot.
+: > "$root/etc/machine-id"
+chmod 0444 "$root/etc/machine-id"
+
 printf 'root-a\n' > "$slot_seed_dir/root-a/slot"
 printf 'root-b\n' > "$slot_seed_dir/root-b/slot"
 chmod 0644 "$slot_seed_dir/root-a/slot" "$slot_seed_dir/root-b/slot"
@@ -27,7 +31,7 @@ for name in $allowlist_files; do
     cp -a "$root/etc/$name" "$persist_dir/$name"
 done
 
-for name in shadow gshadow subuid subgid machine-id; do
+for name in shadow gshadow subuid subgid; do
     src_meta=$(stat -c '%u:%g:%a' "$root/etc/$name")
     dst_meta=$(stat -c '%u:%g:%a' "$persist_dir/$name")
 

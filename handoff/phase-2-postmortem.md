@@ -9,7 +9,7 @@ Phase 2 was supposed to produce a fresh-image-only A/B-capable layout that:
 - boots both `root-a` and `root-b` from a visible `systemd-boot` menu
 - keeps `root-a` as the default entry
 - shares `/var` and `/home` across both slots
-- preserves the minimum identity files needed for GNOME Initial Setup and cross-slot login
+- preserves the minimum account files needed for GNOME Initial Setup and cross-slot login
 - keeps both root slots writable in this phase
 
 The first Phase 2 image builds produced the right partitions and booted farther than Phase 1, but they did not actually satisfy the manual slot boot and cross-slot login goals.
@@ -77,7 +77,7 @@ Why this fixed it:
 
 ## Wrong Assumption 3
 
-Bind-mounting the allowlisted identity files directly onto `/etc` was assumed to be compatible with GNOME Initial Setup and `useradd`.
+Bind-mounting the allowlisted account files directly onto `/etc` was assumed to be compatible with GNOME Initial Setup and `useradd`.
 
 What actually happened:
 
@@ -110,10 +110,45 @@ The replacement pieces are:
 Why this fixed it:
 
 - account-management tools now operate on ordinary writable files under `/etc`
-- the minimum Phase 2 identity state still stays aligned across slot switches
+- the minimum Phase 2 account state still stays aligned across slot switches
 - the persistence scope remains narrow instead of becoming generalized `/etc` sync
 
 ## Wrong Assumption 4
+
+`machine-id` was assumed to be safe to handle with the same runtime restore mechanism as the account files.
+
+What actually happened:
+
+- `ab-boot-account-files-restore.service` ran during early boot
+- the helper tried to replace `/etc/machine-id` like an ordinary file
+- boot logs showed `cp: cannot remove '/etc/machine-id': Device or resource busy`
+- the restore unit failed even though the rest of the system still reached GNOME and allowed login
+
+This assumption was wrong because `machine-id` is special:
+
+- systemd uses it very early in boot
+- it must stay unique per installed machine
+- it must not be pre-generated in the build image for all clones
+
+Fix:
+
+- remove `machine-id` from the Phase 2 runtime restore/sync allowlist
+- leave `/etc/machine-id` empty in the built image
+- let systemd generate a unique machine ID on first boot
+
+Why this fixed it:
+
+- the restore unit no longer tries to replace a file that is already in use by systemd
+- the image no longer ships a cloned machine identity
+- Phase 2 stays focused on cross-slot account continuity instead of solving early-boot machine identity
+
+Follow-up requirement:
+
+- Phase 2 intentionally dropped `machine-id` from the shared-state guarantee set
+- a later phase must solve `machine-id` with an earlier-than-login mechanism if cross-slot machine identity continuity is required
+- that later design cannot rely on the current `/var/lib/ab-boot/etc/` restore service because systemd needs `machine-id` earlier in boot
+
+## Wrong Assumption 5
 
 The slot-local marker copy rule in the repart configuration was assumed to reliably land `/usr/lib/ab-boot/slot` inside both root partitions.
 
@@ -145,13 +180,13 @@ Why this fixed it:
 - validation of `root-a` and `root-b` no longer depends on uncertain repart copy behavior
 - the slot marker still stays slot-local, which is the only intentional content difference between the two root slots in this phase
 
-## Wrong Assumption 5
+## Wrong Assumption 6
 
 The Phase 2 handoff was assumed to be clear enough for non-technical validation even when it used shell loops and tool-specific expectations.
 
 What actually happened:
 
-- the validation note used shell loops for comparing persisted identity files
+- the validation note used shell loops for comparing persisted account files
 - a proposed `cmp`-based check assumed tooling that was not available in the guest image
 - marker expectations could be read as if the files should already exist before the step that created them
 
@@ -176,8 +211,9 @@ The working Phase 2 image now has:
 - `root-a` as the default boot target and `root-b` as a manual alternate
 - a slot-local `/usr/lib/ab-boot/slot` marker in each root partition
 - shared `/var` and `/home` partitions
-- a minimum persisted identity store under `/var/lib/ab-boot/etc/`
-- writable `/etc` plus targeted restore/persist logic for the allowlisted identity files
+- a minimum persisted account-file store under `/var/lib/ab-boot/etc/`
+- writable `/etc` plus targeted restore/persist logic for the allowlisted account files
+- an empty `/etc/machine-id` in the image so first boot generates a unique machine identity per installed machine
 
 The final 20G image layout remains:
 

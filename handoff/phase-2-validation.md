@@ -15,9 +15,9 @@ This Phase 2 layout is for fresh images only. Existing single-slot images are no
 - `systemd-boot` shows both slots and defaults to `root-a` after a short timeout.
 - The root filesystem stays mounted read-write on both slots.
 - `/var` and `/home` are shared between slots.
-- `/var/lib/ab-boot/etc/` is the canonical source for the allowlisted identity files.
+- `/var/lib/ab-boot/etc/` is the canonical source for the allowlisted account files.
 - The allowlisted identity files are restored into writable `/etc` before login and persisted back to shared state when they change.
-- Only the allowlisted identity files under `/etc` are guaranteed to stay aligned across slot switches.
+- Only the allowlisted account files under `/etc` are guaranteed to stay aligned across slot switches.
 
 ## Validate The Image
 
@@ -109,15 +109,15 @@ This Phase 2 layout is for fresh images only. Existing single-slot images are no
 
     Expected result: `/var` is mounted from the partition labeled `var` and `/home` is mounted from the partition labeled `home`.
 
-11. Confirm the persisted identity files exist under `/var/lib/ab-boot/etc/`.
+11. Confirm the persisted account files exist under `/var/lib/ab-boot/etc/`.
 
     ```bash
     ls -l /var/lib/ab-boot/etc
     ```
 
-    Expected result: the directory contains `passwd`, `shadow`, `group`, `gshadow`, `subuid`, `subgid`, and `machine-id`.
+    Expected result: the directory contains `passwd`, `shadow`, `group`, `gshadow`, `subuid`, and `subgid`.
 
-12. Confirm each allowlisted `/etc` file matches the persisted copy under `/var/lib/ab-boot/etc/`.
+12. Confirm each allowlisted account file under `/etc` matches the persisted copy under `/var/lib/ab-boot/etc/`.
 
     ```bash
     sha256sum /var/lib/ab-boot/etc/passwd /etc/passwd
@@ -126,7 +126,6 @@ This Phase 2 layout is for fresh images only. Existing single-slot images are no
     sha256sum /var/lib/ab-boot/etc/gshadow /etc/gshadow
     sha256sum /var/lib/ab-boot/etc/subuid /etc/subuid
     sha256sum /var/lib/ab-boot/etc/subgid /etc/subgid
-    sha256sum /var/lib/ab-boot/etc/machine-id /etc/machine-id
     ```
 
     Expected result: each command prints two identical hashes.
@@ -139,12 +138,10 @@ This Phase 2 layout is for fresh images only. Existing single-slot images are no
       /var/lib/ab-boot/etc/gshadow \
       /var/lib/ab-boot/etc/subuid \
       /var/lib/ab-boot/etc/subgid \
-      /var/lib/ab-boot/etc/machine-id \
       /etc/shadow \
       /etc/gshadow \
       /etc/subuid \
-      /etc/subgid \
-      /etc/machine-id
+      /etc/subgid
     ```
 
     Expected result: the persisted copies and their `/etc` runtime views match.
@@ -188,7 +185,7 @@ This Phase 2 layout is for fresh images only. Existing single-slot images are no
 
 18. Confirm the same user created on `root-a` can log in on `root-b` without re-running GNOME Initial Setup.
 
-19. Confirm shared state and persisted identity restore still work on `root-b`.
+19. Confirm shared state and persisted account-file restore still work on `root-b`.
 
     ```bash
     ls -l /var/lib/phase-2-var-marker
@@ -199,7 +196,6 @@ This Phase 2 layout is for fresh images only. Existing single-slot images are no
     sha256sum /var/lib/ab-boot/etc/gshadow /etc/gshadow
     sha256sum /var/lib/ab-boot/etc/subuid /etc/subuid
     sha256sum /var/lib/ab-boot/etc/subgid /etc/subgid
-    sha256sum /var/lib/ab-boot/etc/machine-id /etc/machine-id
     ```
 
     Expected result: the markers created in step 15 are still present, and each `sha256sum` command prints two identical hashes.

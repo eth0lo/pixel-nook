@@ -30,7 +30,7 @@ Inside `arch-gnome.raw`, the Phase 2 partition schema is:
 - `systemd-boot` shows a visible menu with `Arch GNOME (root-a)` and `Arch GNOME (root-b)`.
 - The menu defaults to `root-a` after a short timeout.
 - Both root slots stay mounted read-write in this phase.
-- Shared cross-slot continuity is guaranteed only for `/home`, `/var`, and these `/etc` files: `passwd`, `shadow`, `group`, `gshadow`, `subuid`, `subgid`, and `machine-id`.
+- Shared cross-slot continuity is guaranteed only for `/home`, `/var`, and these `/etc` files: `passwd`, `shadow`, `group`, `gshadow`, `subuid`, and `subgid`.
 - Automatic slot switching, rollback, inactive-slot updates, and generalized `/etc` persistence are not part of Phase 2.
 
 ## Requirements

@@ -27,7 +27,7 @@ Make both `root-a` and `root-b` independently bootable by manual boot entry sele
 - Keep both root slots mounted read-write in this phase.
 - Keep both slots identical except for the slot-local `/usr/lib/ab-boot/slot` marker.
 - Guarantee cross-slot continuity only for `/home`, `/var`, and the allowlisted identity files restored into `/etc` from shared state.
-- Keep the `/etc` persistence scope limited to `/etc/passwd`, `/etc/shadow`, `/etc/group`, `/etc/gshadow`, `/etc/subuid`, `/etc/subgid`, and `/etc/machine-id`.
+- Keep the `/etc` persistence scope limited to `/etc/passwd`, `/etc/shadow`, `/etc/group`, `/etc/gshadow`, `/etc/subuid`, and `/etc/subgid`.
 - Pre-populate `/var/lib/ab-boot/etc/` during image build and treat it as canonical from first boot onward.
 - Keep `/etc` writable for account-management tools and sync only the allowlisted identity files to and from shared state.
 - Support the shipped initialization flow where first-user creation happens on the default `root-a` boot path.
@@ -42,9 +42,9 @@ Diagnostic-only note: booting a pristine image into `root-b` first can still be 
 - Keep the shared ESP payloads for both entries aligned and derive the `root-b` entry from the generated `root-a` entry.
 - Add a slot marker to each slot, such as `/usr/lib/ab-boot/slot`.
 - Persist the first-user account databases needed by GNOME Initial Setup: `passwd`, `shadow`, `group`, `gshadow`, `subuid`, and `subgid`.
-- Persist `machine-id` so identity remains stable across slot switches.
 - Store persisted `/etc` state under `/var/lib/ab-boot/etc/`, not inside either root slot.
-- Pre-populate the allowlisted persisted files during image build.
+- Pre-populate the allowlisted persisted account files during image build.
+- Leave `/etc/machine-id` empty in the image so systemd generates a unique value on first boot.
 - Restore the allowlisted files from `/var/lib/ab-boot/etc/` into `/etc` before login services start.
 - Persist changes to the allowlisted files back into `/var/lib/ab-boot/etc/` as they are updated.
 - Document slot selection through the `systemd-boot` UI.
@@ -60,12 +60,12 @@ At boot, Phase 2 uses this runtime sequence:
 - `ab-boot-account-files-restore.service` runs before login services start.
 - That service calls `/usr/lib/ab-boot/account-files-sync restore`.
 - The restore step copies the allowlisted identity files from `/var/lib/ab-boot/etc/` into `/etc`.
-- `ab-boot-account-files-watch.path` then watches `/etc/passwd`, `/etc/shadow`, `/etc/group`, `/etc/gshadow`, `/etc/subuid`, `/etc/subgid`, and `/etc/machine-id`.
+- `ab-boot-account-files-watch.path` then watches `/etc/passwd`, `/etc/shadow`, `/etc/group`, `/etc/gshadow`, `/etc/subuid`, and `/etc/subgid`.
 - If one of those files changes, systemd starts `ab-boot-account-files-sync.service`.
 - That service calls `/usr/lib/ab-boot/account-files-sync persist`.
 - The persist step copies the current `/etc` versions back into `/var/lib/ab-boot/etc/`.
 
-Phase 2 keeps `/etc` writable for account-management tools. Shared identity continuity is achieved by restore-on-boot plus change-triggered persistence, not by bind-mounting files onto `/etc`.
+Phase 2 keeps `/etc` writable for account-management tools. Shared account continuity is achieved by restore-on-boot plus change-triggered persistence, not by bind-mounting files onto `/etc`. `machine-id` is intentionally not shared in this phase because it must stay unique per installed machine and is generated on first boot.
 
 ## Validation
 
