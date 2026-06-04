@@ -6,7 +6,7 @@ The build toolchain is portable: mkosi and the required Arch build tools run ins
 
 Build output is written to `out/`, including the bootable UEFI disk image at `out/arch-gnome.raw`.
 
-The disk image now uses a Phase 2 A/B-capable layout: a shared ESP, manually bootable `root-a` and `root-b` slots, and separate shared `var` and `home` partitions. `root-a` remains the default boot path, `root-b` is a manual alternate, and only `/home`, `/var`, and an allowlisted set of identity files under `/etc` are guaranteed to stay aligned across slot switches.
+The disk image now uses a Phase 3 A/B-capable layout: a shared ESP, manually bootable `root-a` and `root-b` slots, separate shared `var` and `home` partitions, and slot health state persisted under `/var/lib/ab-boot/slots/`. `root-a` remains the default boot path, `root-b` is a manual alternate, and only `/home`, `/var`, and an allowlisted set of identity files under `/etc` are guaranteed to stay aligned across slot switches.
 
 ## What This Produces
 
@@ -17,7 +17,7 @@ After a successful build, `out/` contains:
 - `arch-gnome.initrd`: the generated initrd artifact
 - `initrd.cpio.zst`: the initrd archive generated during the build
 
-Inside `arch-gnome.raw`, the Phase 2 partition schema is:
+Inside `arch-gnome.raw`, the Phase 3 partition schema is:
 
 - `esp`: shared EFI System Partition used by UEFI and `systemd-boot`
 - `root-a`: the default booted root slot in this phase
@@ -25,13 +25,15 @@ Inside `arch-gnome.raw`, the Phase 2 partition schema is:
 - `var`: shared writable `/var`
 - `home`: shared writable `/home`
 
-## Phase 2 Behavior
+## Phase 3 Behavior
 
 - `systemd-boot` shows a visible menu with `Arch GNOME (root-a)` and `Arch GNOME (root-b)`.
 - The menu defaults to `root-a` after a short timeout.
 - Both root slots stay mounted read-write in this phase.
 - Shared cross-slot continuity is guaranteed only for `/home`, `/var`, and these `/etc` files: `passwd`, `shadow`, `group`, `gshadow`, `subuid`, and `subgid`.
-- Automatic slot switching, rollback, inactive-slot updates, and generalized `/etc` persistence are not part of Phase 2.
+- `abctl` can report the current slot, inactive slot, and whether the current boot has been confirmed healthy.
+- A boot is marked healthy only after `gdm.service` is active and the success record is written to shared `/var`.
+- Automatic slot switching, rollback, inactive-slot updates, and generalized `/etc` persistence are not part of Phase 3.
 
 ## Requirements
 
@@ -165,12 +167,13 @@ cp /usr/share/edk2/ovmf/OVMF_VARS_4M.qcow2 out/archlinux_VARS.qcow2
 - `Containerfile`: builds the portable mkosi build environment
 - `docker-entrypoint.sh`: runs mkosi inside the container
 - `mkosi/mkosi.conf`: defines the Arch GNOME image
-- `mkosi/mkosi.repart/`: defines the fixed Phase 2 disk layout
+- `mkosi/mkosi.repart/`: defines the fixed A/B disk layout
 - `mkosi/mkosi.extra/`: files copied into the image
 - `mkosi/mkosi.postinst`: post-install customization run by mkosi
 - `mkosi/mkosi.finalize`: final build customization run by mkosi
 - `handoff/phase-1-validation.md`: manual validation checklist for the Phase 1 layout
 - `handoff/phase-2-validation.md`: manual validation checklist for the Phase 2 layout
+- `handoff/phase-3-validation.md`: manual validation checklist for the Phase 3 layout
 - `out/`: generated build output
 
 ## Notes

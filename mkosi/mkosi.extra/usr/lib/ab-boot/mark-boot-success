@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+. /usr/lib/ab-boot/common.sh
+
+systemctl is-active --quiet gdm.service || ab_boot_die 'gdm.service is not active; boot remains unconfirmed'
+
+state_dir=$(ab_boot_state_dir)
+current_slot=$(ab_boot_current_slot)
+current_boot_id=$(ab_boot_current_boot_id)
+state_file=$(ab_boot_state_file "$current_slot")
+
+ab_boot_read_state "$current_slot"
+
+if [ "$AB_BOOT_SUCCESS" = 1 ] && [ "$AB_LAST_BOOT_ID" = "$current_boot_id" ]; then
+    exit 0
+fi
+
+mkdir -p "$state_dir"
+chmod 0755 "$state_dir"
+chown root:root "$state_dir"
+
+tmp_file=$(mktemp "$state_dir/.${current_slot}.env.tmp.XXXXXX")
+trap 'rm -f "$tmp_file"' EXIT HUP INT TERM
+
+timestamp=$(date +%s)
+
+{
+    printf 'BOOT_SUCCESS=1\n'
+    printf 'LAST_BOOT_ID=%s\n' "$current_boot_id"
+    printf 'LAST_SUCCESS_EPOCH=%s\n' "$timestamp"
+} > "$tmp_file"
+
+chmod 0644 "$tmp_file"
+chown root:root "$tmp_file"
+mv -f "$tmp_file" "$state_file"
+trap - EXIT HUP INT TERM

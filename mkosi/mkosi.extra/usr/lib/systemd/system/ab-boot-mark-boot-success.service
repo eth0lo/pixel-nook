@@ -1,0 +1,11 @@
+[Unit]
+Description=Record current slot boot success after GDM is active
+RequiresMountsFor=/var/lib/ab-boot/slots
+After=gdm.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/ab-boot/mark-boot-success
+
+[Install]
+WantedBy=graphical.target

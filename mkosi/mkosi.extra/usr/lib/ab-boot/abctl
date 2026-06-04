@@ -1,0 +1,74 @@
+#!/bin/sh
+set -eu
+
+AB_BOOT_EXIT_CODE=2
+
+. /usr/lib/ab-boot/common.sh
+
+usage() {
+    printf '%s\n' 'usage: abctl status|current-slot|inactive-slot|health' >&2
+    exit 2
+}
+
+print_slot_status() {
+    slot="$1"
+
+    ab_boot_read_state "$slot"
+    historical_success=no
+    current_boot_confirmed=no
+
+    if [ "$AB_BOOT_SUCCESS" = 1 ]; then
+        historical_success=yes
+    fi
+
+    if ab_boot_current_boot_confirmed "$slot"; then
+        current_boot_confirmed=yes
+    fi
+
+    printf 'Slot %s historical success: %s\n' "$slot" "$historical_success"
+    printf 'Slot %s last boot ID: %s\n' "$slot" "${AB_LAST_BOOT_ID:-none}"
+    printf 'Slot %s last success epoch: %s\n' "$slot" "${AB_LAST_SUCCESS_EPOCH:-none}"
+    printf 'Slot %s current boot confirmed: %s\n' "$slot" "$current_boot_confirmed"
+}
+
+command_name="${1:-}"
+
+case "$command_name" in
+    current-slot)
+        ab_boot_current_slot
+        ;;
+    inactive-slot)
+        ab_boot_inactive_slot
+        ;;
+    health)
+        slot=$(ab_boot_current_slot) || exit 2
+
+        if ab_boot_current_boot_confirmed "$slot"; then
+            printf '%s\n' healthy
+            exit 0
+        fi
+
+        printf '%s\n' unconfirmed
+        exit 1
+        ;;
+    status)
+        current_slot=$(ab_boot_current_slot)
+        inactive_slot=$(ab_boot_inactive_slot)
+        current_boot_id=$(ab_boot_current_boot_id)
+        root_source=$(findmnt -no SOURCE -T / 2>/dev/null || true)
+
+        printf 'Current slot: %s\n' "$current_slot"
+        printf 'Inactive slot: %s\n' "$inactive_slot"
+        printf 'Mounted root source: %s\n' "${root_source:-unknown}"
+        printf 'Current boot ID: %s\n' "$current_boot_id"
+
+        print_slot_status root-a
+        print_slot_status root-b
+        ;;
+    '')
+        usage
+        ;;
+    *)
+        usage
+        ;;
+esac
