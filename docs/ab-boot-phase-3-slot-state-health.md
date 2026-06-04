@@ -22,17 +22,19 @@ Teach the system which slot is running and whether the current boot is healthy.
 - Add an `abctl` helper or equivalent command.
 - Detect the current slot from the mounted root partition label.
 - Report the inactive slot.
-- Store slot metadata under `/var/lib/ab-boot/` or a project-specific equivalent.
-- Add a systemd oneshot service that marks the current boot successful.
-- Decide whether to integrate with `systemd-bless-boot.service` and boot counting.
+- Store slot metadata under `/var/lib/ab-boot/slots/` as per-slot `.env` files.
+- Add a systemd oneshot service that marks the current boot successful only after `gdm.service` is active.
+- Defer `systemd-bless-boot.service` and boot counting to Phase 5.
 
 ## Validation
 
 - Boot slot A and confirm current slot reports `root-a`.
 - Boot slot B and confirm current slot reports `root-b`.
 - Confirm the inactive slot is reported correctly from each slot.
-- Confirm the health service runs after required boot targets.
-- Confirm successful boot state is persisted under `/var`.
+- Confirm `abctl health` is initially unconfirmed and later reports healthy for the current boot.
+- Confirm the health service runs after `gdm.service` becomes active.
+- Confirm successful boot state is persisted under `/var/lib/ab-boot/slots/`.
+- Confirm a non-graphical boot remains unconfirmed.
 
 ## Deployable Gate
 

@@ -14,10 +14,11 @@ if [ -z "$root" ]; then
 fi
 
 persist_dir="$root/var/lib/ab-boot/etc"
+slot_state_dir="$root/var/lib/ab-boot/slots"
 slot_seed_dir="$root/usr/lib/ab-boot/slot-seeds"
 
 mkdir -p "$root/home" "$root/var" "$persist_dir" \
-    "$slot_seed_dir/root-a" "$slot_seed_dir/root-b"
+    "$slot_state_dir" "$slot_seed_dir/root-a" "$slot_seed_dir/root-b"
 
 # Leave machine-id empty in the image so systemd generates a unique value on first boot.
 : > "$root/etc/machine-id"
@@ -29,6 +30,17 @@ chmod 0644 "$slot_seed_dir/root-a/slot" "$slot_seed_dir/root-b/slot"
 
 for name in $allowlist_files; do
     cp -a "$root/etc/$name" "$persist_dir/$name"
+done
+
+for slot in root-a root-b; do
+    state_file="$slot_state_dir/$slot.env"
+
+    cat > "$state_file" <<EOF
+BOOT_SUCCESS=0
+LAST_BOOT_ID=
+LAST_SUCCESS_EPOCH=
+EOF
+    chmod 0644 "$state_file"
 done
 
 for name in shadow gshadow subuid subgid; do
@@ -57,3 +69,4 @@ systemctl --root="$root" enable avahi-daemon.service
 systemctl --root="$root" enable cups.service
 systemctl --root="$root" enable ab-boot-account-files-restore.service
 systemctl --root="$root" enable ab-boot-account-files-watch.path
+systemctl --root="$root" enable ab-boot-mark-boot-success.service
